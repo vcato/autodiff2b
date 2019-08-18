@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <iostream>
+#include <cmath>
 
 using std::cerr;
 
@@ -18,9 +19,23 @@ template <size_t index> struct Indexed
 template <size_t expr_index,typename Nodes> struct Graph {};
 template <typename...> struct List {};
 template <size_t key,size_t value> struct MapEntry {};
-template <size_t a,size_t b> struct Add {};
-template <size_t a,size_t b> struct Mul {};
-template <size_t x,size_t y,size_t z> struct Vec3 {};
+
+template <size_t a_index,size_t b_index> struct Add {
+  static float eval(float a,float b) { return a+b; }
+};
+
+template <size_t a_index,size_t b_index> struct Mul
+{
+  static float eval(float a,float b) { return a*b; }
+};
+
+
+template <size_t x_index> struct Sqrt
+{
+  static float eval(float x) { return std::sqrt(x); }
+};
+
+
 template <size_t row_0,size_t row_1,size_t row_2> struct Mat33 {};
 template <size_t index> struct XValue {};
 template <size_t index> struct YValue {};
@@ -444,6 +459,12 @@ struct Vec3f {
 }
 
 
+template <size_t x_index,size_t y_index,size_t z_index> struct Vec3
+{
+  static Vec3f eval(float x,float y,float z) { return Vec3f{x,y,z}; }
+};
+
+
 static Vec3f vec3(float x,float y,float z)
 {
   return Vec3f{x,y,z};
@@ -465,28 +486,10 @@ auto evalExpr(Var<A>, const Values &,const Lets &lets)
 
 
 namespace {
-template <size_t a_index,size_t b_index>
-auto evalOp(Add<a_index,b_index>,float a,float b)
+template <typename Op,typename... Args>
+auto evalOp(Op,Args... args)
 {
-  return a+b;
-}
-}
-
-
-namespace {
-template <size_t a_index,size_t b_index>
-auto evalOp(Mul<a_index,b_index>,float a,float b)
-{
-  return a*b;
-}
-}
-
-
-namespace {
-template <size_t x_index,size_t y_index,size_t z_index>
-auto evalOp(Vec3<x_index,y_index,z_index>,float x,float y,float z)
-{
-  return vec3(x,y,z);
+  return Op::eval(args...);
 }
 }
 
@@ -742,6 +745,20 @@ static auto col(const M &m)
 }
 
 
+template <size_t index,typename Nodes>
+static auto sqrt(Graph<index,Nodes>)
+{
+  return mergedGraph(Nodes{},Sqrt<index>{});
+}
+
+
+template <typename V>
+static auto mag(const V &v)
+{
+  return sqrt(dot(v,v));
+}
+
+
 int main()
 {
   testFindNodeIndex();
@@ -808,6 +825,12 @@ int main()
     Vec3f row2 = vec3(7,8,9);
     auto result = eval(aT0,let(a,mat33(row0,row1,row2)));
     auto expected_result = vec3(xValue(row0),xValue(row1),xValue(row2));
+    assert(result == expected_result);
+  }
+  {
+    auto v = var<struct V>();
+    float result = eval(mag(v),let(v,vec3(1,2,3)));
+    float expected_result = mag(vec3(1,2,3));
     assert(result == expected_result);
   }
 }
