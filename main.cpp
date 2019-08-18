@@ -2,6 +2,9 @@
 #include <cassert>
 #include <iostream>
 #include <cmath>
+#include <random>
+
+#define ADD_QR_DECOMP 0
 
 using std::cerr;
 
@@ -9,6 +12,10 @@ using std::cerr;
 namespace {
 
 template <typename Tag> struct Var { };
+
+template <typename ValueType> struct Const { };
+
+
 template <typename Tag> struct Tagged {};
 
 template <size_t index> struct Indexed
@@ -16,17 +23,47 @@ template <size_t index> struct Indexed
   static constexpr auto value = index;
 };
 
-template <size_t expr_index,typename Nodes> struct Graph {};
+
+template <size_t expr_index,typename Nodes> struct Graph
+{
+  operator float() const;
+};
+
+
+
 template <typename...> struct List {};
 template <size_t key,size_t value> struct MapEntry {};
 
-template <size_t a_index,size_t b_index> struct Add {
+struct Zero {
+  static float value() { return 0; }
+};
+
+
+template <size_t a_index,size_t b_index>
+struct Add {
   static float eval(float a,float b) { return a+b; }
 };
 
+
+template <size_t a_index,size_t b_index>
+struct Sub
+{
+  template <typename A,typename B>
+  static auto eval(const A& a,const B& b) { return a-b; }
+};
+
+
 template <size_t a_index,size_t b_index> struct Mul
 {
-  static float eval(float a,float b) { return a*b; }
+  template <typename A,typename B>
+  static auto eval(const A& a,const B& b) { return a*b; }
+};
+
+
+template <size_t a_index,size_t b_index> struct Div
+{
+  template <typename A,typename B>
+  static auto eval(const A &a,const B &b) { return a/b; }
 };
 
 
@@ -36,7 +73,6 @@ template <size_t x_index> struct Sqrt
 };
 
 
-template <size_t row_0,size_t row_1,size_t row_2> struct Mat33 {};
 template <size_t index> struct XValue {};
 template <size_t index> struct YValue {};
 template <size_t index> struct ZValue {};
@@ -127,10 +163,51 @@ auto var()
 
 
 namespace {
+template <typename Tag>
+auto constant()
+{
+  using Expr = Const<Tag>;
+  using Node0 = Node<0,Expr>;
+  return Graph<0,List<Node0>>{};
+}
+}
+
+
+template <typename Value>
+static float
+  floatValue(
+    Graph<0,
+      List<
+        Node<0,Const<Value>>
+      >
+    >
+  )
+{
+  return Value::value();
+}
+
+
+template <size_t expr_index,typename Nodes>
+Graph<expr_index,Nodes>::operator float() const
+{
+  return floatValue(*this);
+}
+
+
+namespace {
 template <typename A,typename Map>
 auto mapExpr(Var<A>,Map)
 {
   return Var<A>{};
+}
+}
+
+
+namespace {
+template <typename A,typename Map>
+auto mapExpr(Const<A>,Map)
+{
+  return Const<A>{};
 }
 }
 
@@ -346,9 +423,33 @@ template <
   size_t index_a,typename NodesA,
   size_t index_b,typename NodesB
 >
+auto operator-(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
+{
+  return binary<Sub>(graph_a,graph_b);
+}
+}
+
+
+namespace {
+template <
+  size_t index_a,typename NodesA,
+  size_t index_b,typename NodesB
+>
 auto operator*(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
 {
   return binary<Mul>(graph_a,graph_b);
+}
+}
+
+
+namespace {
+template <
+  size_t index_a,typename NodesA,
+  size_t index_b,typename NodesB
+>
+auto operator/(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
+{
+  return binary<Div>(graph_a,graph_b);
 }
 }
 
@@ -459,16 +560,46 @@ struct Vec3f {
 }
 
 
-template <size_t x_index,size_t y_index,size_t z_index> struct Vec3
-{
-  static Vec3f eval(float x,float y,float z) { return Vec3f{x,y,z}; }
-};
-
-
 static Vec3f vec3(float x,float y,float z)
 {
   return Vec3f{x,y,z};
 }
+
+
+#if ADD_QR_DECOMP
+namespace {
+Vec3f operator-(const Vec3f &a,const Vec3f& b)
+{
+  return vec3(a.x-b.x,a.y-b.y,a.z-b.z);
+}
+}
+#endif
+
+
+#if ADD_QR_DECOMP
+namespace {
+Vec3f operator*(const Vec3f &a,float b)
+{
+  return vec3(a.x*b,a.y*b,a.z*b);
+}
+}
+#endif
+
+
+#if ADD_QR_DECOMP
+namespace {
+Vec3f operator/(const Vec3f &a,float b)
+{
+  return vec3(a.x/b,a.y/b,a.z/b);
+}
+}
+#endif
+
+
+template <size_t x_index,size_t y_index,size_t z_index> struct Vec3
+{
+  static Vec3f eval(float x,float y,float z) { return Vec3f{x,y,z}; }
+};
 
 
 static float xValue(const Vec3f &v) { return v.x; }
@@ -481,6 +612,15 @@ template <typename A,typename Values,typename Lets>
 auto evalExpr(Var<A>, const Values &,const Lets &lets)
 {
   return getLet(Tagged<A>{},lets);
+}
+}
+
+
+namespace {
+template <typename A,typename Values,typename Lets>
+auto evalExpr(Const<A>, const Values &,const Lets &)
+{
+  return A::value();
 }
 }
 
@@ -618,6 +758,29 @@ struct Mat33f {
 
 
 namespace {
+Mat33f mat33(Vec3f r1,Vec3f r2,Vec3f r3)
+{
+  float values[3][3] = {
+    {r1.x,r1.y,r1.z},
+    {r2.x,r2.y,r2.z},
+    {r3.x,r3.y,r3.z},
+  };
+
+  return Mat33f{values};
+}
+}
+
+
+template <size_t row_0,size_t row_1,size_t row_2> struct Mat33
+{
+  static Mat33f eval(const Vec3f &row0,const Vec3f &row1,const Vec3f &row2)
+  {
+    return mat33(row0,row1,row2);
+  }
+};
+
+
+namespace {
 template <
   size_t mat_index,
   size_t row,
@@ -629,20 +792,6 @@ auto evalExpr(Elem<mat_index,row,col>, const Values &values,const Lets &)
 {
   Mat33f mat_value = getValue(Indexed<mat_index>{},values);
   return mat_value.values[row][col];
-}
-}
-
-
-namespace {
-Mat33f mat33(Vec3f r1,Vec3f r2,Vec3f r3)
-{
-  float values[3][3] = {
-    {r1.x,r1.y,r1.z},
-    {r2.x,r2.y,r2.z},
-    {r3.x,r3.y,r3.z},
-  };
-
-  return Mat33f{values};
 }
 }
 
@@ -672,8 +821,23 @@ static auto mat33(
   return
     mergedGraph(
       Row012Nodes{},
-      Vec3<new_row0_index,new_row1_index,new_row2_index>{}
+      Mat33<new_row0_index,new_row1_index,new_row2_index>{}
     );
+}
+
+
+template <typename Col0,typename Col1,typename Col2>
+static auto columns(
+  Col0 &col0,
+  Col1 &col1,
+  Col2 &col2
+)
+{
+  return mat33(
+    vec3(xValue(col0),xValue(col1),xValue(col2)),
+    vec3(yValue(col0),yValue(col1),yValue(col2)),
+    vec3(zValue(col0),zValue(col1),zValue(col2))
+  );
 }
 
 
@@ -735,6 +899,13 @@ static auto elem(Graph<mat_index,Nodes>)
 }
 
 
+template <size_t row,size_t col>
+static auto elem(const Mat33f &m)
+{
+  return m.values[row][col];
+}
+
+
 template <size_t index,typename M>
 static auto col(const M &m)
 {
@@ -756,6 +927,80 @@ template <typename V>
 static auto mag(const V &v)
 {
   return sqrt(dot(v,v));
+}
+
+
+template <typename Q,typename R>
+struct QR {
+  const Q q;
+  const R r;
+};
+
+
+template <typename Q,typename R>
+static QR<Q,R> qr(const Q &q,const R &r)
+{
+  return {q,r};
+}
+
+
+#if ADD_QR_DECOMP
+template <typename A>
+static auto qrDecomposition(const A &a)
+{
+  auto a1 = col<0>(a);
+  auto a2 = col<1>(a);
+  auto a3 = col<2>(a);
+  auto u1 = a1;
+  auto r11 = mag(u1);
+  auto q1 = u1/r11;
+  auto r12 = dot(a2,q1);
+  auto u2 = a2 - q1*r12;
+  auto r22 = mag(u2);
+  auto q2 = u2/r22;
+  auto r13 = dot(q1,a3);
+  auto r23 = dot(q2,a3);
+  auto u3 = a3 - q1*r13 - q2*r23;
+  auto r33 = mag(u3);
+  auto q3 = u3/r33;
+  auto zero = constant<Zero>();
+  auto row0 = vec3( r11, r12,r13);
+  auto row1 = vec3(zero, r22,r23);
+  auto row2 = vec3(zero,zero,r33);
+  auto r = mat33(row0,row1,row2);
+  auto q = columns(q1,q2,q3);
+  return qr(q,r);
+}
+#endif
+
+
+template <typename RandomEngine>
+static float randomFloat(RandomEngine &engine)
+{
+  return std::uniform_real_distribution<float>(-1,1)(engine);
+}
+
+
+template <typename RandomEngine>
+static Mat33f randomMat33(RandomEngine &engine)
+{
+  float m00 = randomFloat(engine);
+  float m01 = randomFloat(engine);
+  float m02 = randomFloat(engine);
+  float m10 = randomFloat(engine);
+  float m11 = randomFloat(engine);
+  float m12 = randomFloat(engine);
+  float m20 = randomFloat(engine);
+  float m21 = randomFloat(engine);
+  float m22 = randomFloat(engine);
+
+  const float values[3][3] = {
+    {m00,m01,m02},
+    {m10,m11,m12},
+    {m20,m21,m22}
+  };
+
+  return {values};
 }
 
 
@@ -790,6 +1035,12 @@ int main()
     auto b = var<struct B>();
     auto c = a*b;
     assert(eval(c,let(a,3),let(b,4)) == 3*4);
+  }
+  {
+    auto a = var<struct A>();
+    auto b = var<struct B>();
+    auto c = a/b;
+    assert(eval(c,let(a,3.0f),let(b,4.0f)) == 3.0f/4.0f);
   }
   {
     auto ax = var<struct A>();
@@ -833,4 +1084,20 @@ int main()
     float expected_result = mag(vec3(1,2,3));
     assert(result == expected_result);
   }
+#if ADD_QR_DECOMP
+  {
+    using RandomEngine = std::mt19937;
+    RandomEngine engine(/*seed*/1);
+    Mat33f a_value = randomMat33(engine);
+    auto a = var<struct A>();
+    auto qr = qrDecomposition(a);
+    auto q_result = eval(qr.q,let(a,a_value));
+    auto r_result = eval(qr.r,let(a,a_value));
+    auto qr_value = qrDecomposition(a_value);
+    auto expected_q_result = qr_value.q;
+    auto expected_r_result = qr_value.r;
+    assert(q_result == expected_q_result);
+    assert(r_result == expected_r_result);
+  }
+#endif
 }
