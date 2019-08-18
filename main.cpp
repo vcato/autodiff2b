@@ -1,5 +1,10 @@
 #include <cstdlib>
 #include <cassert>
+#include <iostream>
+
+
+using std::cerr;
+
 
 namespace {
 
@@ -12,14 +17,19 @@ template <size_t index> struct Indexed
 };
 
 template <size_t expr_index,typename Nodes> struct Graph {};
-
 template <typename...> struct List {};
 template <size_t key,size_t value> struct MapEntry {};
 template <size_t a,size_t b> struct Add {};
+template <size_t a,size_t b> struct Mul {};
+template <size_t x,size_t y,size_t z> struct Vec3 {};
+template <size_t index> struct XValue {};
+template <size_t index> struct YValue {};
+template <size_t index> struct ZValue {};
+
 template <size_t index,typename Expr> struct Node {};
 
 struct Empty {};
-struct None{};
+struct None {};
 
 }
 
@@ -87,7 +97,7 @@ auto findNewIndex(Index, List<FirstEntry, Entries...>)
 template <size_t index,typename Map>
 static constexpr size_t mapped_index =
   decltype(findNewIndex(Indexed<index>{},Map{}))::value;
-  
+
 
 namespace {
 template <typename Tag>
@@ -110,12 +120,10 @@ auto mapExpr(Var<A>,Map)
 
 
 namespace {
-template <size_t index1, size_t index2, typename Map>
-auto mapExpr(Add<index1, index2>, Map)
+template <template<size_t...> typename Op,size_t... indices,typename Map>
+auto mapExpr(Op<indices...>, Map)
 {
-  constexpr size_t new_index1 = mapped_index<index1,Map>;
-  constexpr size_t new_index2 = mapped_index<index2,Map>;
-  return Add<new_index1,new_index2>{};
+  return Op<mapped_index<indices,Map>...>{};
 }
 }
 
@@ -130,15 +138,28 @@ auto findNodeIndex(Expr,List<Node<index,Expr>,Nodes...>)
 
 
 namespace {
+template <typename Expr>
+auto findNodeIndex(Expr,List<>)
+{
+  return None{};
+}
+}
+
+
+namespace {
 template <
   typename Expr,
   size_t index2,
   typename Expr2,
   typename... Nodes
 >
-auto findNodeIndex(Expr, List<Node<index2, Expr2>,Nodes...>)
+auto
+  findNodeIndex(
+    Expr,
+    List<Node<index2, Expr2>, Nodes...>
+  )
 {
-  return None{};
+  return findNodeIndex(Expr{},List<Nodes...>{});
 }
 }
 
@@ -256,25 +277,53 @@ constexpr size_t listSize = ListSize<L>::value;
 
 
 namespace {
+template <typename MergedNodes,typename NewExpr>
+auto mergedGraph(MergedNodes,NewExpr)
+{
+  auto new_nodes = addNode(MergedNodes{},NewExpr{});
+  return Graph<listSize<MergedNodes>,decltype(new_nodes)>{};
+}
+}
+
+
+namespace {
+template <
+  template <size_t,size_t> typename Op,
+  size_t index_a,typename NodesA,
+  size_t index_b,typename NodesB
+>
+auto binary(Graph<index_a,NodesA>,Graph<index_b,NodesB>)
+{
+  constexpr size_t new_index_a = index_a;
+  using MergeResult = decltype(merge(NodesA{},NodesB{}));
+  using MergedNodes = typename MergeResult::Nodes;
+  using MapB = typename MergeResult::MapB;
+  constexpr size_t new_index_b = mapped_index<index_b,MapB>;
+  return mergedGraph(MergedNodes{},Op<new_index_a,new_index_b>{});
+}
+}
+
+
+namespace {
 template <
   size_t index_a,typename NodesA,
   size_t index_b,typename NodesB
 >
-auto operator+(Graph<index_a,NodesA>,Graph<index_b,NodesB>)
+auto operator+(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
 {
-  auto merged = merge(NodesA{},NodesB{});
-  using MergeResult = decltype(merged);
-  using MergedNodes = typename MergeResult::Nodes;
-  using MapB = typename MergeResult::MapB;
-  using NewExprIndexB = decltype(findNewIndex(Indexed<index_b>{},MapB{}));
+  return binary<Add>(graph_a,graph_b);
+}
+}
 
-  auto new_nodes =
-    addNode(
-      MergedNodes{},
-      Add<index_a,NewExprIndexB::value>{}
-    );
 
-  return Graph<listSize<MergedNodes>,decltype(new_nodes)>{};
+namespace {
+template <
+  size_t index_a,typename NodesA,
+  size_t index_b,typename NodesB
+>
+auto operator*(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
+{
+  return binary<Mul>(graph_a,graph_b);
 }
 }
 
@@ -374,6 +423,29 @@ auto getValue(Indexed<index>, const IndexedValueList<First, index2, T>& values)
 
 
 namespace {
+struct Vec3f {
+  const float x,y,z;
+
+  bool operator==(const Vec3f &arg) const
+  {
+    return x==arg.x && y==arg.y && z==arg.z;
+  }
+};
+}
+
+
+static Vec3f vec3(float x,float y,float z)
+{
+  return Vec3f{x,y,z};
+}
+
+
+static float xValue(const Vec3f &v) { return v.x; }
+static float yValue(const Vec3f &v) { return v.y; }
+static float zValue(const Vec3f &v) { return v.z; }
+
+
+namespace {
 template <typename A,typename Values,typename Lets>
 auto evalExpr(Var<A>, const Values &,const Lets &lets)
 {
@@ -383,12 +455,52 @@ auto evalExpr(Var<A>, const Values &,const Lets &lets)
 
 
 namespace {
-template <size_t index1,size_t index2,typename Values,typename Lets>
-auto evalExpr(Add<index1,index2>, const Values &values,const Lets &)
+template <size_t a_index,size_t b_index>
+auto evalOp(Add<a_index,b_index>,float a,float b)
 {
-  auto value1 = getValue(Indexed<index1>{},values);
-  auto value2 = getValue(Indexed<index2>{},values);
-  return value1 + value2;
+  return a+b;
+}
+}
+
+
+namespace {
+template <size_t a_index,size_t b_index>
+auto evalOp(Mul<a_index,b_index>,float a,float b)
+{
+  return a*b;
+}
+}
+
+
+namespace {
+template <size_t x_index,size_t y_index,size_t z_index>
+auto evalOp(Vec3<x_index,y_index,z_index>,float x,float y,float z)
+{
+  return vec3(x,y,z);
+}
+}
+
+
+namespace {
+
+template <size_t i> auto evalOp(XValue<i>,const Vec3f &v) { return xValue(v); }
+template <size_t i> auto evalOp(YValue<i>,const Vec3f &v) { return yValue(v); }
+template <size_t i> auto evalOp(ZValue<i>,const Vec3f &v) { return zValue(v); }
+
+}
+
+
+
+namespace {
+template <
+  template <size_t...> typename Op,
+  size_t... indices,
+  typename Values,
+  typename Lets
+>
+auto evalExpr(Op<indices...>, const Values &values,const Lets &)
+{
+  return evalOp(Op<indices...>{},getValue(Indexed<indices>{},values)...);
 }
 }
 
@@ -439,8 +551,84 @@ auto
 }
 
 
+template <
+  size_t x_index,size_t y_index,size_t z_index,
+  typename XNodes,typename YNodes,typename ZNodes
+>
+static auto vec3(
+  Graph<x_index,XNodes>,
+  Graph<y_index,YNodes>,
+  Graph<z_index,ZNodes>
+)
+{
+  constexpr size_t new_x_index = x_index;
+  using XYMergeResult = decltype(merge(XNodes{},YNodes{}));
+  using XYNodes = typename XYMergeResult::Nodes;
+  using MapY = typename XYMergeResult::MapB;
+  constexpr size_t new_y_index = mapped_index<y_index,MapY>;
+  using XYZMergeResult = decltype(merge(XYNodes{},ZNodes{}));
+  using XYZNodes = typename XYZMergeResult::Nodes;
+  using MapZ = typename XYZMergeResult::MapB;
+  constexpr size_t new_z_index = mapped_index<z_index,MapZ>;
+
+  return mergedGraph(XYZNodes{},Vec3<new_x_index,new_y_index,new_z_index>{});
+}
+
+
+template <size_t index,typename Nodes>
+static auto xValue(Graph<index,Nodes>)
+{
+  return mergedGraph(Nodes{},XValue<index>{});
+}
+
+
+template <size_t index,typename Nodes>
+static auto yValue(Graph<index,Nodes>)
+{
+  return mergedGraph(Nodes{},YValue<index>{});
+}
+
+
+template <size_t index,typename Nodes>
+static auto zValue(Graph<index,Nodes>)
+{
+  return mergedGraph(Nodes{},ZValue<index>{});
+}
+
+
+template <typename A,typename B>
+static auto dot(A a,B b)
+{
+  return
+    xValue(a)*xValue(b) +
+    yValue(a)*yValue(b) +
+    zValue(a)*zValue(b);
+}
+
+
+static void testFindNodeIndex()
+{
+  struct A;
+  struct B;
+
+  using MaybeMergedIndex =
+    decltype(
+      findNodeIndex(
+        Var<B>{},
+        List<
+          Node<0,Var<A>>,
+          Node<1,Var<B>>
+        >{}
+      )
+    );
+
+  static_assert(MaybeMergedIndex::value == 1);
+}
+
+
 int main()
 {
+  testFindNodeIndex();
   {
     auto a = var<struct A>();
     auto b = a+a;
@@ -463,5 +651,37 @@ int main()
     auto b = var<struct B>();
     auto c = (a+a)+(b+b);
     assert(eval(c,let(a,3),let(b,4)) == (3+3)+(4+4));
+  }
+  {
+    auto a = var<struct A>();
+    auto b = var<struct B>();
+    auto c = a*b;
+    assert(eval(c,let(a,3),let(b,4)) == 3*4);
+  }
+  {
+    auto ax = var<struct A>();
+    auto ay = var<struct B>();
+    auto az = var<struct C>();
+    auto v = vec3(ax,ay,az);
+    auto result = eval(v,let(ax,1),let(ay,2),let(az,3));
+    auto expected_result = vec3(1,2,3);
+    assert(result == expected_result);
+  }
+  {
+    auto ax = var<struct AX>();
+    auto ay = var<struct AY>();
+    auto az = var<struct AZ>();
+    auto bx = var<struct BX>();
+    auto by = var<struct BY>();
+    auto bz = var<struct BZ>();
+    auto a = vec3(ax,ay,az);
+    auto b = vec3(bx,by,bz);
+    auto c = dot(a,b);
+
+    auto result =
+      eval(c,let(ax,1),let(ay,2),let(az,3),let(bx,4),let(by,5),let(bz,6));
+
+    auto expected_result = dot(vec3(1,2,3),vec3(4,5,6));
+    assert(result == expected_result);
   }
 }
