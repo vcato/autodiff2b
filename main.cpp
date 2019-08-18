@@ -122,26 +122,19 @@ template <typename First,typename Tag,typename T> struct LetList {
 
 
 namespace {
-template <
-  size_t expr_index,size_t value_index,typename... Entries
->
-Indexed<value_index>
-  findNewIndex(
-    Indexed<expr_index>,
-    List<MapEntry<expr_index,value_index>,
-    Entries...>
-  )
+template <size_t from_index,size_t to_index>
+constexpr auto findNewIndex2(MapEntry<from_index,to_index>)
 {
-  return {};
+  return Indexed<to_index>{};
 }
 }
-
 
 namespace {
-template <typename Index,typename FirstEntry, typename... Entries>
-auto findNewIndex(Index, List<FirstEntry, Entries...>)
+template <typename Index,typename... Entries>
+auto findNewIndex(Index, List<Entries...>)
 {
-  return findNewIndex(Index{}, List<Entries...>{});
+  struct X : Entries... { };
+  return findNewIndex2<Index::value>(X{});
 }
 }
 
@@ -230,9 +223,20 @@ auto mapExpr(Elem<mat_index,row,col>, Map)
 }
 
 
+
 namespace {
-template <typename Expr,size_t index,typename... Nodes>
-auto findNodeIndex(Expr,List<Node<index,Expr>,Nodes...>)
+template <typename Expr>
+None findNodeIndex2(...)
+{
+  return {};
+}
+}
+
+
+namespace {
+template <typename Expr,size_t index>
+auto
+  findNodeIndex2(const Node<index,Expr> &)
 {
   return Indexed<index>{};
 }
@@ -240,28 +244,18 @@ auto findNodeIndex(Expr,List<Node<index,Expr>,Nodes...>)
 
 
 namespace {
-template <typename Expr>
-auto findNodeIndex(Expr,List<>)
-{
-  return None{};
-}
-}
-
-
-namespace {
 template <
   typename Expr,
-  size_t index2,
-  typename Expr2,
   typename... Nodes
 >
 auto
   findNodeIndex(
     Expr,
-    List<Node<index2, Expr2>, Nodes...>
+    List<Nodes...>
   )
 {
-  return findNodeIndex(Expr{},List<Nodes...>{});
+  struct X : Nodes... {};
+  return findNodeIndex2<Expr>(X{});
 }
 }
 
