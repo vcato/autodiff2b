@@ -1,2 +1,6 @@
-I think it's going to simplify things if a graph is just a list of nodes.
-* The result of the graph is always the last node.
+We can probably speed up the computation by changing how we do
+the evaluation.
+
+Instead of having the ValueList structure, we should be able to construct
+a single type derived from a list of indexed values, and then pull out the
+value we want directly using the function overload resolution technique.

@@ -113,15 +113,6 @@ struct Let {
 
 
 namespace {
-template <typename First,typename Tag,typename T> struct LetList {
-  First first;
-  const T value;
-};
-}
-
-
-
-namespace {
 template <size_t from_index,size_t to_index>
 constexpr auto findNewIndex2(MapEntry<from_index,to_index>)
 {
@@ -458,28 +449,11 @@ auto let(Graph<0,List<Node<0,Var<Tag>>>>,const T& value)
 
 
 namespace {
-template <typename First,typename Tag,typename T>
-auto letList(First first,Let<Tag,T> last_let)
+template <typename...Lets>
+auto buildLetList(Lets... lets)
 {
-  return LetList<First,Tag,T>{first,last_let.value};
-}
-}
-
-
-namespace {
-template <typename Result>
-auto buildLetList(Result result)
-{
-  return result;
-}
-}
-
-
-namespace {
-template <typename Result,typename FirstLet,typename... RestLets>
-auto buildLetList(Result result,FirstLet first_let,RestLets... rest_lets)
-{
-  return buildLetList(letList(result,first_let),rest_lets...);
+  struct X : Lets... { };
+  return X{lets...};
 }
 }
 
@@ -507,19 +481,19 @@ auto valueList(IndexedValueList<First,index,T1> values,T value)
 
 
 namespace {
-template <typename Tag,typename First,typename T>
-auto getLet(Tagged<Tag>,const LetList<First, Tag,T>& lets)
+template <typename Tag,typename T>
+auto getLet2(const Let<Tag,T> &value)
 {
-  return lets.value;
+  return value.value;
 }
 }
 
 
 namespace {
-template <typename Tag,typename Tag2,typename First,typename T2>
-auto getLet(Tagged<Tag>,const LetList<First, Tag2, T2>& lets)
+template <typename Tag,typename Lets>
+auto getLet(Tagged<Tag>,const Lets &lets)
 {
-  return getLet(Tagged<Tag>{},lets.first);
+  return getLet2<Tag>(lets);
 }
 }
 
@@ -691,7 +665,6 @@ auto
       Nodes{},
       buildLetList(Empty{},lets...)
     );
-
 
   return getValue(Indexed<index>{},values);
 }
