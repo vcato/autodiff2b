@@ -87,10 +87,20 @@ struct None {};
 
 
 namespace {
+template <size_t index,typename T>
+struct IndexedValue {
+  const T value;
+};
+}
+
+
+namespace {
 template <typename First,size_t index,typename T>
-struct IndexedValueList {
-  First first;
-  T value;
+struct IndexedValueList : First, IndexedValue<index,T> {
+  IndexedValueList(const First &first_arg,T value)
+  : First(first_arg), IndexedValue<index,T>{value}
+  {
+  }
 };
 }
 
@@ -449,33 +459,10 @@ auto let(Graph<0,List<Node<0,Var<Tag>>>>,const T& value)
 
 
 namespace {
-template <typename...Lets>
-auto buildLetList(Lets... lets)
+template <size_t index,typename First,typename T>
+auto valueList(const First &first,T value)
 {
-  struct X : Lets... { };
-  return X{lets...};
-}
-}
-
-
-namespace {
-template <typename T>
-auto valueList(Empty,T value)
-{
-  return IndexedValueList<Empty,0,T>{Empty{},value};
-}
-}
-
-
-namespace {
-template <size_t index,typename First,typename T1,typename T>
-auto valueList(IndexedValueList<First,index,T1> values,T value)
-{
-  return
-    IndexedValueList<IndexedValueList<First,index,T1>,index+1,T>{
-      values,
-      value
-    };
+  return IndexedValueList<First,index,T>{first,value};
 }
 }
 
@@ -499,19 +486,19 @@ auto getLet(Tagged<Tag>,const Lets &lets)
 
 
 namespace {
-template <size_t index,typename First,typename T>
-auto getValue(Indexed<index>,IndexedValueList<First,index,T> list)
+template <size_t index,typename T>
+auto getValue2(const IndexedValue<index,T> &value)
 {
-  return list.value;
+  return value.value;
 }
 }
 
 
 namespace {
-template <size_t index,size_t index2,typename T, typename First>
-auto getValue(Indexed<index>, const IndexedValueList<First, index2, T>& values)
+template <size_t index,typename List>
+auto getValue(Indexed<index>,const List &list)
 {
-  return getValue(Indexed<index>{}, values.first);
+  return getValue2<index>(list);
 }
 }
 
@@ -646,7 +633,7 @@ template <
 auto evalNodes(Values values,List<Node<index,Expr>,Nodes...>,Lets lets)
 {
   auto value = evalExpr(Expr{}, values, lets);
-  return evalNodes(valueList(values,value),List<Nodes...>{},lets);
+  return evalNodes(valueList<index>(values,value),List<Nodes...>{},lets);
 }
 }
 
@@ -659,11 +646,13 @@ auto
     Lets... lets
   )
 {
+  struct : Lets... {} let_list {lets...};
+
   auto values =
     evalNodes(
-      Empty{},
+      /*values*/Empty{},
       Nodes{},
-      buildLetList(Empty{},lets...)
+      let_list
     );
 
   return getValue(Indexed<index>{},values);

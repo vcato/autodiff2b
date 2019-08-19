@@ -4,3 +4,6 @@ the evaluation.
 Instead of having the ValueList structure, we should be able to construct
 a single type derived from a list of indexed values, and then pull out the
 value we want directly using the function overload resolution technique.
+
+The thing is, I need to be able to construct new values as I'm evaluating.
+This seems to be incompatible with using the variadic base class approach.
