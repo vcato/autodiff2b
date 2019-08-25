@@ -35,10 +35,17 @@ template <size_t index> struct Indexed
 
 namespace {
 
+
 template <size_t expr_index,typename Nodes> struct Graph
 {
-  operator float() const;
 };
+
+
+template <size_t expr_index,typename Nodes>
+static constexpr auto indexOf(Graph<expr_index,Nodes>)
+{
+  return expr_index;
+}
 
 }
 
@@ -235,13 +242,6 @@ static float
   )
 {
   return Value::value();
-}
-
-
-template <size_t expr_index,typename Nodes>
-Graph<expr_index,Nodes>::operator float() const
-{
-  return floatValue(*this);
 }
 
 
@@ -723,6 +723,17 @@ auto evalNodes(Values values,List<Node<index,Expr>,Nodes...>,const Lets &lets)
 
 
 namespace {
+template <typename Nodes,typename... Lets>
+static auto buildValues(Nodes,Lets... lets)
+{
+  struct : Lets... {} let_list {lets...};
+
+  return evalNodes( /*values*/Empty{}, Nodes{}, let_list );
+}
+}
+
+
+namespace {
 template <typename Nodes,size_t index,typename ...Lets>
 auto
   eval(
@@ -730,15 +741,16 @@ auto
     Lets... lets
   )
 {
-  struct : Lets... {} let_list {lets...};
+  auto values = buildValues(Nodes{},lets...);
+  return getValue(Indexed<index>{},values);
+}
+}
 
-  auto values =
-    evalNodes(
-      /*values*/Empty{},
-      Nodes{},
-      let_list
-    );
 
+namespace {
+template <typename Nodes,size_t index,typename Values>
+auto get(Graph<index,Nodes>,const Values &values)
+{
   return getValue(Indexed<index>{},values);
 }
 }
@@ -1053,7 +1065,7 @@ struct AdjointGraph {
 
 
 template <typename Adjoints,typename Nodes>
-static auto adjointsOf(AdjointGraph<Adjoints,Nodes>)
+static constexpr auto adjointsOf(AdjointGraph<Adjoints,Nodes>)
 {
   return Adjoints{};
 }
@@ -1093,6 +1105,13 @@ static auto addTo(AdjointGraph<Adjoints,List<Nodes...>>,Indexed<i>,Indexed<k>)
     decltype(setAdjoint(Adjoints{},Indexed<i>{},Indexed<new_index>{}));
 
   return AdjointGraph<NewAdjoints,NewNodes>{};
+}
+
+
+template <typename AdjointGraph,size_t k,typename Tag>
+static auto addDeriv(AdjointGraph,Node<k,Var<Tag>>)
+{
+  return AdjointGraph{};
 }
 
 
@@ -1200,15 +1219,6 @@ static auto
 }
 
 
-namespace {
-
-template <typename NodesList,typename AdjointsList>
-struct AdjointNodesResult {
-};
-
-}
-
-
 template <size_t zero_node>
 static auto makeZeroAdjoints(Indexed<0>,Indexed<zero_node>)
 {
@@ -1236,7 +1246,7 @@ static auto adjointNodes(Graph<result_index,List<Nodes...>>)
   // Add a zero node to the nodes.
   using InsertResult1 = decltype(insertNode(List<Nodes...>{},Const<Zero>{}));
   using NodesWithZero = decltype(newNodesOf(InsertResult1{}));
-  constexpr size_t zero_index = InsertResult1::new_index;
+  constexpr size_t zero_index = newIndexOf(InsertResult1{});
 
   // Build the initial set of adjoints where all nodes are zero.
   using Adjoints =
@@ -1247,7 +1257,7 @@ static auto adjointNodes(Graph<result_index,List<Nodes...>>)
   // Add a 1 to the nodes.
   using InsertResult2 = decltype(insertNode(NodesWithZero{},Const<One>{}));
   using NodesWithOne = decltype(newNodesOf(InsertResult2{}));
-  constexpr size_t one_index = InsertResult2::new_index;
+  constexpr size_t one_index = newIndexOf(InsertResult2{});
 
   // Set the adjoint of our result node to 1.
   using Adjoints2 =
@@ -1268,9 +1278,38 @@ static auto adjointNodes(Graph<result_index,List<Nodes...>>)
       )
     );
 
-  using NewNodes = typename RevResult::NewNodes;
-  using NewAdjoints = typename RevResult::NewAdjoints;
-  return AdjointNodesResult<NewNodes,NewAdjoints>{};
+  using NewNodes = decltype(nodesOf(RevResult{}));
+  using NewAdjoints = decltype(adjointsOf(RevResult{}));
+  return AdjointGraph<NewAdjoints,NewNodes>{};
+}
+
+
+static void testFindAdjoint()
+{
+  using Adjoints =
+    AdjointList<
+    AdjointList<
+    AdjointList<
+    AdjointList<
+    AdjointList<
+    AdjointList<
+    AdjointList<
+    AdjointList<
+    AdjointList<
+    AdjointList<Empty,
+    0, 5>,
+    1, 5>,
+    2, 5>,
+    3, 5>,
+    4, 5>,
+    4, 6>,
+    2, 8>,
+    3, 10>,
+    0, 12>, // dA = C*B
+    1, 14>;
+
+  constexpr size_t result = findAdjoint(Adjoints{},Indexed<0>{});
+  static_assert(result == 12);
 }
 
 
@@ -1374,39 +1413,70 @@ static auto nodesOf(Graph<index,List<Nodes...>>)
 }
 
 
-#if 0
+// This needs to get the variable tag and look that up in the adjoint
+// grpah.
+template <typename AdjointGraph,typename Tag>
+static auto
+  varAdjoint(
+    Graph<
+      0,
+      List<
+        Node<0,Var<Tag>>
+      >
+    >,
+    AdjointGraph
+  )
+{
+  using NodeIndex =
+    decltype(findNodeIndex(Var<Tag>{},nodesOf(AdjointGraph{})));
+
+  return Indexed<findAdjoint(adjointsOf(AdjointGraph{}),NodeIndex{})>{};
+}
+
+
+template <typename Variable,typename Values,typename AdjointGraph>
+static auto adjointValue(Variable,const Values &values,AdjointGraph)
+{
+  using Index = decltype(varAdjoint(Variable{},AdjointGraph{}));
+  return getValue(Index{},values);
+}
+
+
 static void testAdjointNodes()
 {
+  // Define our graph
   auto a = var<struct A>();
   auto b = var<struct B>();
   auto c = var<struct C>();
   auto graph = a*b*c;
-  using AdjointNodesResult = decltype(adjointNodes(graph));
-  using NewNodes = AdjointNodesResult::NewNodes;
-  using Adjoints = AdjointNodesResult::Adjoints;
 
-  auto da = findAdjoint(a,Adjoints{});
-  auto db = findAdjoint(b,Adjoints{});
-  auto dc = findAdjoint(c,Adjoints{});
+  // Create the adjoint graph
+  using AdjointGraph = decltype(adjointNodes(graph));
 
+  // Evaluate the adjoint graph
   float a_val = 5;
   float b_val = 6;
   float c_val = 7;
+  using NewNodes = decltype(nodesOf(AdjointGraph{}));
 
   auto values =
-    evalNodes(
-      buildValues(let(a,a_val),let(b,b_val),let(c,c_val)),
-      newnodes
+    buildValues(
+      NewNodes{},
+      let(a,a_val),
+      let(b,b_val),
+      let(c,c_val)
     );
 
-  float da_val = get(da,values);
-  float db_val = get(db,values);
-  float dc_val = get(dc,values);
+  // Extract the derivatives
+  float da_val = adjointValue(a,values,AdjointGraph{});
+  float db_val = adjointValue(b,values,AdjointGraph{});
+  float dc_val = adjointValue(c,values,AdjointGraph{});
+
+  // Verify
   assert(da_val == b_val*c_val);
   assert(db_val == a_val*c_val);
   assert(dc_val == a_val*b_val);
 }
-#endif
 
 
 int main()
@@ -1505,9 +1575,8 @@ int main()
     assert(r_result == expected_r_result);
   }
 #endif
+  testFindAdjoint();
   testMakeZeroAdjoints();
   testAddDeriv();
-#if 0
   testAdjointNodes();
-#endif
 }
