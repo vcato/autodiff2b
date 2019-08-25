@@ -3,41 +3,71 @@
 #include <iostream>
 #include <cmath>
 #include <random>
+#include <type_traits>
 
 #define ADD_QR_DECOMP 0
 
+
 using std::cerr;
+using std::is_same_v;
 
 
 namespace {
 
 template <typename Tag> struct Var { };
-
 template <typename ValueType> struct Const { };
 
 
 template <typename Tag> struct Tagged {};
+
+}
+
+
+namespace {
 
 template <size_t index> struct Indexed
 {
   static constexpr auto value = index;
 };
 
+}
+
+
+namespace {
 
 template <size_t expr_index,typename Nodes> struct Graph
 {
   operator float() const;
 };
 
+}
 
+
+
+namespace {
 
 template <typename...> struct List {};
 template <size_t key,size_t value> struct MapEntry {};
+
+}
+
+
+namespace {
 
 struct Zero {
   static float value() { return 0; }
 };
 
+
+struct One {
+  static float value() { return 1; }
+};
+
+
+}
+
+
+namespace {
 
 template <size_t a_index,size_t b_index>
 struct Add {
@@ -95,6 +125,42 @@ struct IndexedValue {
 
 
 namespace {
+
+template <typename First,size_t node_index,size_t adjoint_node_index>
+struct AdjointList : First, MapEntry<node_index,adjoint_node_index> {
+};
+
+}
+
+
+template <typename First,size_t node_index,size_t adjoint_node_index>
+static constexpr size_t
+  findAdjoint(
+    AdjointList<First,node_index,adjoint_node_index>,
+    Indexed<node_index>
+  )
+{
+  return adjoint_node_index;
+}
+
+
+template <
+  typename First,
+  size_t node_index1,
+  size_t node_index2,
+  size_t adjoint_node_index
+>
+static constexpr size_t
+  findAdjoint(
+    AdjointList<First,node_index1,adjoint_node_index>,
+    Indexed<node_index2>
+  )
+{
+  return findAdjoint(First{},Indexed<node_index2>{});
+}
+
+
+namespace {
 template <typename First,size_t index,typename T>
 struct IndexedValueList : First, IndexedValue<index,T> {
   IndexedValueList(const First &first_arg,T value)
@@ -124,25 +190,16 @@ struct Let {
 
 namespace {
 template <size_t from_index,size_t to_index>
-constexpr auto findNewIndex2(MapEntry<from_index,to_index>)
+constexpr auto findNewIndex(MapEntry<from_index,to_index>)
 {
   return Indexed<to_index>{};
-}
-}
-
-namespace {
-template <typename Index,typename... Entries>
-auto findNewIndex(Index, List<Entries...>)
-{
-  struct X : Entries... { };
-  return findNewIndex2<Index::value>(X{});
 }
 }
 
 
 template <size_t index,typename Map>
 static constexpr size_t mapped_index =
-  decltype(findNewIndex(Indexed<index>{},Map{}))::value;
+  decltype(findNewIndex<index>(Map{}))::value;
 
 
 namespace {
@@ -227,7 +284,7 @@ auto mapExpr(Elem<mat_index,row,col>, Map)
 
 namespace {
 template <typename Expr>
-None findNodeIndex2(...)
+None findNodeIndexHelper(...)
 {
   return {};
 }
@@ -236,8 +293,7 @@ None findNodeIndex2(...)
 
 namespace {
 template <typename Expr,size_t index>
-auto
-  findNodeIndex2(const Node<index,Expr> &)
+auto findNodeIndexHelper(const Node<index,Expr> &)
 {
   return Indexed<index>{};
 }
@@ -249,24 +305,36 @@ template <
   typename Expr,
   typename... Nodes
 >
-auto
-  findNodeIndex(
-    Expr,
-    List<Nodes...>
-  )
+auto findNodeIndex(Expr, List<Nodes...>)
 {
   struct X : Nodes... {};
-  return findNodeIndex2<Expr>(X{});
+  return findNodeIndexHelper<Expr>(X{});
 }
 }
 
 
 namespace {
+
+
 template <typename NewMergedNodesArg,size_t new_index_arg>
 struct UpdateMergedNodesResult {
-  using NewMergedNodes = NewMergedNodesArg;
-  static constexpr size_t new_index = new_index_arg;
 };
+
+
+template <typename NewNodes,size_t new_index>
+static auto newNodesOf(UpdateMergedNodesResult<NewNodes,new_index>)
+{
+  return NewNodes{};
+}
+
+
+template <typename NewNodes,size_t new_index>
+static constexpr size_t newIndexOf(UpdateMergedNodesResult<NewNodes,new_index>)
+{
+  return new_index;
+}
+
+
 }
 
 
@@ -274,8 +342,8 @@ namespace {
 template <typename... Nodes,size_t new_index,typename Expr>
 auto updateMergedNodes(List<Nodes...>,Indexed<new_index>,Expr)
 {
-  using NewMergedNodes = List<Nodes...>;
-  return UpdateMergedNodesResult<NewMergedNodes,new_index>{};
+  using NewNodes = List<Nodes...>;
+  return UpdateMergedNodesResult<NewNodes,new_index>{};
 }
 }
 
@@ -285,18 +353,39 @@ template <typename... Nodes,typename Expr>
 auto updateMergedNodes(List<Nodes...>,None,Expr)
 {
   static constexpr size_t new_index = sizeof...(Nodes);
-  using NewMergedNodes = List<Nodes...,Node<new_index,Expr>>;
-  return UpdateMergedNodesResult<NewMergedNodes,new_index>{};
+  using NewNodes = List<Nodes...,Node<new_index,Expr>>;
+  return UpdateMergedNodesResult<NewNodes,new_index>{};
 }
 }
 
 
 namespace {
-// If there are no more nodes to add, return what we've build.
+template <typename First,typename Entry>
+struct MapList : First, Entry {
+};
+}
+
+
+namespace {
+// If there are no more nodes to add, return what we've built.
 template <typename NewMergedNodes,typename NewMapB>
 auto buildMergedNodes(NewMergedNodes, List<>, NewMapB)
 {
   return MergeResult<NewMergedNodes,NewMapB>{};
+}
+}
+
+
+namespace {
+template <typename Nodes,typename Expr>
+auto insertNode(Nodes,Expr)
+{
+  using MaybeIndex = decltype(findNodeIndex(Expr{},Nodes{}));
+
+  using UpdateResult = decltype(updateMergedNodes(Nodes{},MaybeIndex{},Expr{}));
+    // This is a UpdateMergedNodesResult
+
+  return UpdateResult{};
 }
 }
 
@@ -308,39 +397,34 @@ template <
   typename... BNodes,
   size_t index_b,
   typename ExprB,
-  typename... MapBEntries
+  typename MapB
 >
 auto
   buildMergedNodes(
     MergedNodes,
     List<Node<index_b,ExprB>,BNodes...>,
-    List<MapBEntries...>
+    MapB
   )
 {
-  using MappedExpr = decltype(mapExpr(ExprB{},List<MapBEntries...>{}));
-  using MaybeMergedIndex = decltype(findNodeIndex(MappedExpr{},MergedNodes{}));
-
   using UpdateResult =
-    decltype(updateMergedNodes(MergedNodes{},MaybeMergedIndex{},MappedExpr{}));
+    decltype(insertNode(MergedNodes{},mapExpr(ExprB{},MapB{})));
 
-  using NewMergedNodes = typename UpdateResult::NewMergedNodes;
-  constexpr auto new_index = UpdateResult::new_index;
+  using NewMergedNodes = decltype(newNodesOf(UpdateResult{}));
+  constexpr auto new_index = newIndexOf(UpdateResult{});
 
-  using NewMapB = List<MapBEntries...,MapEntry<index_b,new_index>>;
+  using NewMapB = MapList<MapB,MapEntry<index_b,new_index>>;
   return buildMergedNodes(NewMergedNodes{},List<BNodes...>{},NewMapB{});
 }
 }
 
 
 namespace {
-// Build the merged nodes by starting with the first list of nodes and
-// adding the second list.
 template <typename... NodesA,typename...NodesB>
 auto merge(List<NodesA...>,List<NodesB...>)
 {
   using MergedNodes = List<NodesA...>;
-  using MapEntries = List<>;
-  return buildMergedNodes(MergedNodes{},List<NodesB...>{},MapEntries{});
+  using MapB = Empty;
+  return buildMergedNodes(MergedNodes{},List<NodesB...>{},MapB{});
 }
 }
 
@@ -394,7 +478,7 @@ auto binary(Graph<index_a,NodesA>,Graph<index_b,NodesB>)
   constexpr size_t new_index_a = index_a;
   using MergeResult = decltype(merge(NodesA{},NodesB{}));
   using MergedNodes = typename MergeResult::Nodes;
-  using MapB = typename MergeResult::MapB;
+  using MapB        = typename MergeResult::MapB;
   constexpr size_t new_index_b = mapped_index<index_b,MapB>;
   return mergedGraph(MergedNodes{},Op<new_index_a,new_index_b>{});
 }
@@ -630,7 +714,7 @@ template <
   typename Expr,
   typename... Nodes
 >
-auto evalNodes(Values values,List<Node<index,Expr>,Nodes...>,Lets lets)
+auto evalNodes(Values values,List<Node<index,Expr>,Nodes...>,const Lets &lets)
 {
   auto value = evalExpr(Expr{}, values, lets);
   return evalNodes(valueList<index>(values,value),List<Nodes...>{},lets);
@@ -960,6 +1044,371 @@ static Mat33f randomMat33(RandomEngine &engine)
 }
 
 
+namespace {
+
+
+template <typename Adjoints,typename Nodes>
+struct AdjointGraph {
+};
+
+
+template <typename Adjoints,typename Nodes>
+static auto adjointsOf(AdjointGraph<Adjoints,Nodes>)
+{
+  return Adjoints{};
+}
+
+
+template <typename Adjoints,typename Nodes>
+static auto nodesOf(AdjointGraph<Adjoints,Nodes>)
+{
+  return Nodes{};
+}
+
+
+}
+
+
+template <typename OldAdjointList,size_t adjoint_index,size_t value_index>
+static auto
+  setAdjoint(OldAdjointList,Indexed<adjoint_index>,Indexed<value_index>)
+{
+  return AdjointList<OldAdjointList,adjoint_index,value_index>{};
+}
+
+
+// adjoints[i] += k
+template <typename Adjoints,typename... Nodes,size_t i,size_t k>
+static auto addTo(AdjointGraph<Adjoints,List<Nodes...>>,Indexed<i>,Indexed<k>)
+{
+  constexpr size_t adjoint_i = findAdjoint(Adjoints{},Indexed<i>{});
+
+  using InsertResult =
+    decltype(insertNode(List<Nodes...>{},Add<adjoint_i,k>{}));
+
+  using NewNodes = decltype(newNodesOf(InsertResult{}));
+  constexpr size_t new_index = newIndexOf(InsertResult{});
+
+  using NewAdjoints =
+    decltype(setAdjoint(Adjoints{},Indexed<i>{},Indexed<new_index>{}));
+
+  return AdjointGraph<NewAdjoints,NewNodes>{};
+}
+
+
+template <typename AdjointGraph,size_t k,size_t i,size_t j>
+static auto addDeriv(AdjointGraph,Node<k,Add<i,j>>)
+{
+  // adjoints[i] += adjoints[k];
+  // adjoints[j] += adjoints[k];
+  //
+  // Add a new node which is the sum of node[adjoints[i]] and node[adjoints[k]]
+  // Replace adjoints[i] with the new node index.
+  using NewGraph1 = decltype(addTo(AdjointGraph{},i,k));
+
+  // Add a new node which is the sum of node[adjoints[j]] and node[adjoints[k]]
+  // Replace adjoints[j] with the new node index.
+  using NewGraph2 = decltype(addTo(NewGraph1{},j,k));
+
+  return NewGraph2{};
+}
+
+
+template <typename Adjoints,typename Nodes,size_t k,size_t i,size_t j>
+static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Mul<i,j>>)
+{
+  // adjoints[i] += adjoints[k]*adjoints[j];
+  // adjoints[j] += adjoints[k]*adjoints[i];
+  //
+  constexpr size_t adjoint_k = findAdjoint(Adjoints{},Indexed<k>{});
+
+  // adjoints[i] += adjoints[k]*adjoints[j];
+
+  // Insert adjoints[k]*adjoints[j] into the nodes
+  using InsertResult1 =
+    decltype(insertNode(Nodes{},Mul<adjoint_k,j>{}));
+    // This is a UpdateMergedNodesResult
+
+  using NewNodes1 = decltype(newNodesOf(InsertResult1{}));
+  constexpr size_t ak_times_aj = newIndexOf(InsertResult1{});
+
+  // add adjoints[k]*adjoints[j] to adjoints[i]
+  using NewGraph1 =
+    decltype(
+      addTo(
+        AdjointGraph<Adjoints,NewNodes1>{},
+        Indexed<i>{},
+        Indexed<ak_times_aj>{}
+      )
+    );
+
+  using Adjoints1 = decltype(adjointsOf(NewGraph1{}));
+  using NewNodes2 = decltype(nodesOf(NewGraph1{}));
+
+  // adjoints[j] += adjoints[k]*adjoints[i];
+
+  // Insert adjoints[k]*adjoints[i] into the nodes
+  using InsertResult2 =
+    decltype(insertNode(NewNodes2{},Mul<adjoint_k,i>{}));
+
+  using NewNodes3 = decltype(newNodesOf(InsertResult2{}));
+  constexpr size_t ak_times_ai = newIndexOf(InsertResult2{});
+
+  // add adjoints[k]*adjoints[i] to adjoints[j]
+  using NewGraph2 =
+    decltype(
+      addTo(
+        AdjointGraph<Adjoints1,NewNodes3>{},
+        Indexed<j>{},
+        Indexed<ak_times_ai>{}
+      )
+    );
+
+  using Adjoints2 = decltype(adjointsOf(NewGraph2{}));
+  using NewNodes4 = decltype(nodesOf(NewGraph2{}));
+
+  return AdjointGraph<Adjoints2,NewNodes4>{};
+}
+
+
+template <typename Adjoints,typename NewNodes>
+static auto revNodes(AdjointGraph<Adjoints,NewNodes>,List<>)
+{
+  return AdjointGraph<Adjoints,NewNodes>{};
+}
+
+
+// revNodes adds derivatives to nodes and updates the adjoint list.
+// returns an AdjointGraph<Adjoints,NodeList>
+template <
+  typename AdjointGraph,
+  size_t index,
+  typename Expr,
+  typename...Nodes
+>
+static auto
+  revNodes(
+    AdjointGraph,
+    List<Node<index,Expr>,Nodes...>
+  )
+{
+  // We'll need to have an array which indicates what the adjoint node
+  // is for each node.  This array will be updated as we process through
+  // the nodes in reverse.
+  auto newgraph = revNodes(AdjointGraph{},List<Nodes...>{});
+  return addDeriv( newgraph, Node<index,Expr>{} );
+}
+
+
+namespace {
+
+template <typename NodesList,typename AdjointsList>
+struct AdjointNodesResult {
+};
+
+}
+
+
+template <size_t zero_node>
+static auto makeZeroAdjoints(Indexed<0>,Indexed<zero_node>)
+{
+  return Empty{};
+}
+
+
+template <size_t node_count,size_t zero_node>
+static auto
+  makeZeroAdjoints(Indexed<node_count>,Indexed<zero_node>)
+{
+  using First =
+    decltype(makeZeroAdjoints(Indexed<node_count-1>{},Indexed<zero_node>{}));
+
+  return AdjointList<First,node_count-1,zero_node>{};
+}
+
+
+// Create the nodes that contain the adjoints by going through a forward
+// and reverse pass.  In the forward pass, we introduce an adjoint node
+// for each node.  In the reverse pass, we update the adjoint nodes.
+template <typename... Nodes,size_t result_index>
+static auto adjointNodes(Graph<result_index,List<Nodes...>>)
+{
+  // Add a zero node to the nodes.
+  using InsertResult1 = decltype(insertNode(List<Nodes...>{},Const<Zero>{}));
+  using NodesWithZero = decltype(newNodesOf(InsertResult1{}));
+  constexpr size_t zero_index = InsertResult1::new_index;
+
+  // Build the initial set of adjoints where all nodes are zero.
+  using Adjoints =
+    decltype(
+      makeZeroAdjoints(Indexed<sizeof...(Nodes)>{},Indexed<zero_index>{})
+    );
+
+  // Add a 1 to the nodes.
+  using InsertResult2 = decltype(insertNode(NodesWithZero{},Const<One>{}));
+  using NodesWithOne = decltype(newNodesOf(InsertResult2{}));
+  constexpr size_t one_index = InsertResult2::new_index;
+
+  // Set the adjoint of our result node to 1.
+  using Adjoints2 =
+    decltype(
+      setAdjoint(
+        Adjoints{},
+        /*adjoint_node*/Indexed<result_index>{},
+        /*value*/Indexed<one_index>{}
+      )
+    );
+
+  // Process the nodes in reverse, adding new nodes and updating the adjoints.
+  using RevResult =
+    decltype(
+      revNodes(
+        AdjointGraph<Adjoints2,NodesWithOne>{},
+        List<Nodes...>{}
+      )
+    );
+
+  using NewNodes = typename RevResult::NewNodes;
+  using NewAdjoints = typename RevResult::NewAdjoints;
+  return AdjointNodesResult<NewNodes,NewAdjoints>{};
+}
+
+
+static void testMakeZeroAdjoints()
+{
+  constexpr size_t zero_node = 1;
+  constexpr size_t node_count = 2;
+
+  using Result =
+    decltype(
+      makeZeroAdjoints(
+        Indexed<node_count>{},
+        Indexed<zero_node>{}
+      )
+    );
+
+  using Expected =
+    AdjointList<
+      AdjointList<
+        Empty, 0, zero_node
+      >,
+      1, zero_node
+    >;
+
+  static_assert(is_same_v<Result,Expected>);
+}
+
+
+static void testAddDeriv()
+{
+  // Test adding a multiplication derivative to the adjoints.
+
+  struct A;
+  struct B;
+
+  using Nodes =
+    List<
+      Node<0,Var<A>>,
+      Node<1,Var<B>>,
+      Node<2,Mul<0,1>>,
+      Node<3,Const<Zero>>,
+      Node<4,Const<One>>
+    >;
+
+  using Adjoints =
+    AdjointList<
+      AdjointList<
+        AdjointList<Empty,0,3>,  // adjoints[0] = 3
+        1,3                      // adjoints[1] = 3
+      >,
+      2,4                        // adjoints[2] = 4
+    >;
+
+  using Graph = AdjointGraph<Adjoints,Nodes>;
+  constexpr size_t i = 0;
+  constexpr size_t j = 1;
+  constexpr size_t k = 2;
+  // nk = ni*nj;
+  // ai += ak*nj;
+  // aj += ak*ni;
+  using NodeParam = Node<k,Mul<i,j>>;
+  using Result = decltype(addDeriv(Graph{},NodeParam{}));
+
+  using ExpectedNodes =
+    List<
+      Node<0,Var<A>>,
+      Node<1,Var<B>>,
+      Node<2,Mul<0,1>>,
+      Node<3,Const<Zero>>,
+      Node<4,Const<One>>,
+      Node<5,Mul<4,1>>, // 1*A
+      Node<6,Add<3,5>>, // 0 + 1*A
+      Node<7,Mul<4,0>>, // 1*B
+      Node<8,Add<3,7>>  // 0 + 1*B
+    >;
+
+  using ExpectedAdjoints =
+    AdjointList<
+      AdjointList<
+        AdjointList<
+          AdjointList<
+            AdjointList<Empty,0,3>,  // adjoints[0] = 3
+            1,3                      // adjoints[1] = 3
+          >,
+          2,4                        // adjoints[2] = 4
+        >,
+        0,6                          // adjoints[0] = 6 // 0 + 1*B
+      >,
+      1,8                            // adjoints[1] = 8 // 0 + 1*A
+    >;
+
+  using Expected = AdjointGraph<ExpectedAdjoints,ExpectedNodes>;
+  static_assert(is_same_v<Result,Expected>);
+}
+
+
+template <size_t index,typename... Nodes>
+static auto nodesOf(Graph<index,List<Nodes...>>)
+{
+  return List<Nodes...>{};
+}
+
+
+#if 0
+static void testAdjointNodes()
+{
+  auto a = var<struct A>();
+  auto b = var<struct B>();
+  auto c = var<struct C>();
+  auto graph = a*b*c;
+  using AdjointNodesResult = decltype(adjointNodes(graph));
+  using NewNodes = AdjointNodesResult::NewNodes;
+  using Adjoints = AdjointNodesResult::Adjoints;
+
+  auto da = findAdjoint(a,Adjoints{});
+  auto db = findAdjoint(b,Adjoints{});
+  auto dc = findAdjoint(c,Adjoints{});
+
+  float a_val = 5;
+  float b_val = 6;
+  float c_val = 7;
+
+  auto values =
+    evalNodes(
+      buildValues(let(a,a_val),let(b,b_val),let(c,c_val)),
+      newnodes
+    );
+
+  float da_val = get(da,values);
+  float db_val = get(db,values);
+  float dc_val = get(dc,values);
+  assert(da_val == b_val*c_val);
+  assert(db_val == a_val*c_val);
+  assert(dc_val == a_val*b_val);
+}
+#endif
+
+
 int main()
 {
   testFindNodeIndex();
@@ -1055,5 +1504,10 @@ int main()
     assert(q_result == expected_q_result);
     assert(r_result == expected_r_result);
   }
+#endif
+  testMakeZeroAdjoints();
+  testAddDeriv();
+#if 0
+  testAdjointNodes();
 #endif
 }

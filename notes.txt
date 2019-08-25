@@ -1,9 +1,82 @@
-We can probably speed up the computation by changing how we do
-the evaluation.
+adjointNodes() will need to work a little differently in this version.
+Intead of introducing the adjoint nodes as we go that have special names, we
+need to keep a separate set of adjoint nodes.  As we go through each node,
+we will update the adjoints.
 
-Instead of having the ValueList structure, we should be able to construct
-a single type derived from a list of indexed values, and then pull out the
-value we want directly using the function overload resolution technique.
 
-The thing is, I need to be able to construct new values as I'm evaluating.
-This seems to be incompatible with using the variadic base class approach.
+If we have these nodes:
+  n0 = A
+  n1 = B
+  n2 = n0*n1
+
+We start by having adjoints for each node that are 0.
+  adj0 = 0
+  adj1 = 0
+  adj2 = 0
+
+
+We begin by adding 1 to the adjoint for our final result.
+  adj0 = 0
+  adj1 = 0
+  adj2 = 1
+
+Then we process the last node.
+  adj0 += adj2*n1
+  adj1 += adj2*n0
+
+  adj0 = 1*n1 = n1
+  adj1 = 1*n0 = n0
+
+At the end, we need to look up the adjoints for variables.
+* We might do that by searching through the original nodes to find the node
+  index for the variable we want, and then finding the corresponding adjoint
+  node.
+* Or, we might keep a gradient structure which has the node index for the
+  adjoint of each variable, and we update it as we run across each variable.
+
+Instead of explicitly managing the nodes, we could use the regular Graph type
+and let the new nodes be built by operator overloading.  It seems like this
+would be much slower.  We'd really need to be able to extract a node from
+a graph to create a new graph which only has the referenced nodes.
+
+adjoints = set(adjoints,i,node(newnodes,k) + node(newnodes,i))
+adjoints = set(adjoints,j,node(newnodes,k) + node(newnodes,j))
+
+
+The whole point of the merging mechanism is to allow us to use convenient
+notation.  If we were to pass around a monad explicitly, then we could
+avoid the merging.
+
+  sum_k_i = add(nodes ,k,i)
+    // Add a new node with expression Add<k,i>
+    // Return the new nodes and the new index
+  sum_k_j = add(sum_k_i.nodes,k,j)
+  adjoints2 = set(adjoints ,i,sum_k_i.index)
+  adjoints3 = set(adjoints2,j,sum_k_j.index)
+
+Instead of trying to update an array of adjoints, it may be better to keep
+appending new adjoints to the beginning.  When we need an adjoint, we just
+find the first one that matches.  This may be a problem if we try to find
+an element through base classes and function overloading, because we would
+have an ambiguity.
+
+---
+We can do some computation with constexpr functions and convert them to types.
+The basic idea is to create a class with template parameters that you want to
+do calculations on, then make a static member of that class which is an array
+computed with a constexpr function using the args, then have an alias template
+which expands the array of values back into a type.
+
+template <size_t... args>
+struct Compute {
+  static constexpr auto values = compute(args...);
+};
+
+struct MakeDoubleMap<Values,Sequence<x...>> {
+  using type = List<MapEntry<x,B::values.values[x]>...>;
+};
+
+template <size_t... args>
+using DoubleMap = MakeDoubleMap<Compute<args>,MakeSequence<args>>::type;
+
+I don't know if this can be used to simplify the adjoint calculations.
