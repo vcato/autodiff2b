@@ -62,6 +62,20 @@ Nodes nodesOf(Graph<expr_index,Nodes>);
 namespace {
 
 template <typename...> struct List {};
+
+
+template <typename... Nodes>
+static constexpr size_t sizeOf(List<Nodes...>)
+{
+  return sizeof...(Nodes);
+}
+
+
+}
+
+
+namespace {
+
 template <size_t key,size_t value> struct MapEntry {};
 
 }
@@ -1703,78 +1717,210 @@ static void testDotAdjointNodes()
 
 
 namespace {
+
+// Variable values are set externally, so there's nothing to do here.
+// Not sure if this is the right thing to do.  Might be better to have
+// a let list instead.
+template <size_t n,size_t index,typename A>
+void setValue(float (&/*values*/)[n],Node<index,Var<A>>)
+{
+}
+
+
+template <size_t n,size_t index,typename A>
+void setValue(float (&values)[n],Node<index,Const<A>>)
+{
+  values[index] = A::value();
+}
+
+
+template <size_t n,size_t index,size_t a,size_t b>
+void setValue(float (&values)[n],Node<index,Mul<a,b>>)
+{
+  values[index] = values[a] * values[b];
+}
+
+
+template <size_t n,size_t index,size_t a,size_t b>
+void setValue(float (&values)[n],Node<index,Add<a,b>>)
+{
+  values[index] = values[a] + values[b];
+}
+
+
+}
+
+
+
+#if 1
+namespace {
+
+// Done
+template <
+  size_t begin,
+  size_t end,
+  size_t n_values,
+  typename Nodes
+>
+auto
+  evaluate(
+    Nodes,
+    float (&/*values*/)[n_values]
+  ) -> std::enable_if_t<begin==end>
+{
+}
+
+
+// Skip evaluation until we get to the begin node
+template <
+  size_t begin,
+  size_t end,
+  size_t first,
+  size_t n_values,
+  typename Expr,
+  typename... Nodes
+>
+auto
+  evaluate(
+    List<Node<first,Expr>,Nodes...>,
+    float (&values)[n_values]
+  ) -> std::enable_if_t<(first < begin)>
+{
+  evaluate<begin,end>(List<Nodes...>{},values);
+}
+
+
+// Evaluate the first node and then evaluate the rest.
+template <
+  size_t begin,
+  size_t end,
+  size_t n_values,
+  typename Expr,
+  typename... Nodes
+>
+auto
+  evaluate(
+    List<Node<begin,Expr>,Nodes...>,
+    float (&values)[n_values]
+  ) -> std::enable_if_t<(begin < end)>
+{
+  static_assert(begin < n_values);
+  setValue(values,Node<begin,Expr>{});
+  evaluate<begin+1,end>(List<Nodes...>{},values);
+}
+
+}
+#endif
+
+
+
+namespace {
 template <typename Graph,typename A,typename B> struct Function;
 
-template <size_t value_index,typename Nodes,typename A,typename B>
-struct Function<Graph<value_index,Nodes>,A,B> {
+template <
+  size_t value_index,
+  typename Nodes,
+  typename A,
+  typename B,
+  size_t orig_a_index,
+  size_t orig_b_index
+>
+struct Function<
+  Graph<value_index,Nodes>,
+  Graph<orig_a_index,List<Node<0,Var<A>>>>,
+  Graph<orig_b_index,List<Node<0,Var<B>>>>
+>
+{
   using ValueGraph = Graph<value_index,Nodes>;
   using AdjointGraph = decltype(adjointNodes(ValueGraph{}));
   using AdjointNodes = decltype(nodesOf(AdjointGraph{}));
+  using Adjoints = decltype(adjointsOf(AdjointGraph{}));
 
-  // We need to have a data structure to hold the Values.
-  decltype(nodeValues(AdjointNodes{})) values;
-  // The first evaluator evalutes everything up to and including the node
-  // that is the value of the function.
-  // using Evaluator1 = Evaluator<AdjointNodes,0,index+1>;
-  //
-  // The second evaluator evaluates everything after the node that is
-  // the value of the function.
-  // using Evaluator2 =
-  //   Evaluator<AdjointNodes,index+1,nodeCount(AdjointNodes{})>;
+  static constexpr size_t a_index =
+    decltype(findNodeIndex(Var<A>{},AdjointNodes{}))::value;
 
-#if 0
-  void build(const Vec3f &a,const Vec3f &b)
+  static constexpr size_t b_index =
+    decltype(findNodeIndex(Var<B>{},AdjointNodes{}))::value;
+
+  static constexpr size_t dresult_index =
+    findAdjoint(Adjoints{},Indexed<value_index>{});
+
+  static constexpr size_t n_values = sizeOf(AdjointNodes{});
+  float values[n_values];
+
+  void build(float a,float b)
   {
-    setValue(values,A{},a);
-    setValue(values,B{},b);
-    Evaluator<AdjointNodes,0,index+1>::evaluate(values);
+    values[a_index] = a;
+    values[b_index] = b;
+    evaluate<0,dresult_index>(AdjointNodes{},values);
   }
-#endif
 
-#if 0
-  auto operator()(const Vec3f& a,const Vec3f& b)
-  {
-    return eval(ValueGraph{},let(A{},a),let(B{},b));
-  }
-#else
   auto value() const
   {
-    return getValue(values,value_index);
+    static_assert(value_index < n_values);
+    return values[value_index];
   }
-#endif
 
-#if 0
-  void addDeriv(float dresult,Vec3f &da,Vec3f &db)
+  void addDeriv(float dresult,float &da,float &db)
   {
-    setValue(values,DResult{},dresult);
-    Evaluator<AdjointNodes,index+1,node_count>::evaluate(values);
-    da += getValue(values,DA{});
-    db += getValue(values,DB{});
+    constexpr size_t da_index = findAdjoint(Adjoints{},Indexed<a_index>{});
+    constexpr size_t db_index = findAdjoint(Adjoints{},Indexed<b_index>{});
+    values[dresult_index] = dresult;
+    evaluate<dresult_index+1,n_values>(AdjointNodes(),values);
+    da += values[da_index];
+    db += values[db_index];
   }
-#endif
 };
 }
 
 
 
-#if ADD_TEST
-static void testDotFunction()
+static void testMulFunction()
 {
   auto a = var<struct A>();
   auto b = var<struct B>();
+  auto c = a*b;
+
+  Function< decltype(c), decltype(a),decltype(b) > f;
+  f.build(5,6);
+  float result = f.value();
+  assert(result == 5*6);
+  float da = 0;
+  float db = 0;
+  f.addDeriv(1,da,db);
+  assert(da == 6);
+  assert(db == 5);
+}
+
+
+#if ADD_TEST
+static void testDotFunction()
+{
+  auto ax = var<struct AX>();
+  auto ay = var<struct AY>();
+  auto az = var<struct AZ>();
+  auto bx = var<struct BX>();
+  auto by = var<struct BY>();
+  auto bz = var<struct BZ>();
+  auto a = vec3(ax,ay,az);
+  auto b = vec3(bx,by,bz);
   auto c = dot(a,b);
 
-  Function<decltype(c),decltype(a),decltype(b)> f;
+  Function<
+    decltype(c),
+    decltype(a),decltype(b)
+  > f;
 
   Vec3f a_val = {1,2,3};
   Vec3f b_val = {4,5,6};
   Vec3f da_val = {0,0,0};
   Vec3f db_val = {0,0,0};
-  float value = f(a_val,b_val);
+  f.build(a_val,b_val);
+  float value = f.value();
   assert(value == dot(a_val,b_val));
   f.addDeriv(1,da_val,db_val);
-  assert(da_val = vec3(4,5,6));
-  assert(db_val = vec3(1,2,3));
+  assert(da_val == vec3(4,5,6));
+  assert(db_val == vec3(1,2,3));
 }
 #endif
 
@@ -1883,6 +2029,7 @@ int main()
   testAddDeriv();
   testAdjointNodes();
   testDotAdjointNodes();
+  testMulFunction();
 #if ADD_TEST
   testDotFunction();
 #endif
