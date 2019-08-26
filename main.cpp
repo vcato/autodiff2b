@@ -7,7 +7,6 @@
 
 #define ADD_QR_DECOMP 0
 #define ADD_TEST 0
-#define ADD_TEST2 0
 
 
 using std::cerr;
@@ -1655,39 +1654,52 @@ static void testAdjointNodes()
 }
 
 
-#if ADD_TEST2
 static void testDotAdjointNodes()
 {
   // Define our graph
-  auto a = var<struct A>();
-  auto b = var<struct B>();
-  auto c = var<struct C>();
+  auto ax = var<struct AX>();
+  auto ay = var<struct AY>();
+  auto az = var<struct AZ>();
+  auto bx = var<struct BX>();
+  auto by = var<struct BY>();
+  auto bz = var<struct BZ>();
+  auto a = vec3(ax,ay,az);
+  auto b = vec3(bx,by,bz);
   auto graph = dot(a,b);
 
   // Create the adjoint graph
   using AdjointGraph = decltype(adjointNodes(graph));
 
   // Evaluate the adjoint graph
-  auto a_val = vec3f(1,2,3);
-  auto b_val = vec3f(4,5,6);
+  auto a_val = vec3(1,2,3);
+  auto b_val = vec3(4,5,6);
   using NewNodes = decltype(nodesOf(AdjointGraph{}));
 
   auto values =
     buildValues(
       NewNodes{},
-      let(a,a_val),
-      let(b,b_val)
+      let(ax,a_val.x),
+      let(ay,a_val.y),
+      let(az,a_val.z),
+      let(bx,b_val.x),
+      let(by,b_val.y),
+      let(bz,b_val.z)
     );
 
   // Extract the derivatives
-  Vec3f da_val = adjointValue(a,values,AdjointGraph{});
-  Vec3f db_val = adjointValue(b,values,AdjointGraph{});
+  float dax_val = adjointValue(ax,values,AdjointGraph{});
+  float day_val = adjointValue(ay,values,AdjointGraph{});
+  float daz_val = adjointValue(az,values,AdjointGraph{});
+  float dbx_val = adjointValue(bx,values,AdjointGraph{});
+  float dby_val = adjointValue(by,values,AdjointGraph{});
+  float dbz_val = adjointValue(bz,values,AdjointGraph{});
+  Vec3f da_val = vec3(dax_val,day_val,daz_val);
+  Vec3f db_val = vec3(dbx_val,dby_val,dbz_val);
 
   // Verify
   assert(da_val == vec3(4,5,6));
   assert(db_val == vec3(1,2,3));
 }
-#endif
 
 
 namespace {
@@ -1870,9 +1882,7 @@ int main()
   testMakeZeroAdjoints();
   testAddDeriv();
   testAdjointNodes();
-#if ADD_TEST2
   testDotAdjointNodes();
-#endif
 #if ADD_TEST
   testDotFunction();
 #endif
