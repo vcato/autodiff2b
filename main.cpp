@@ -6,7 +6,6 @@
 #include <type_traits>
 
 #define ADD_QR_DECOMP 0
-#define ADD_TEST 0
 
 
 using std::cerr;
@@ -216,6 +215,14 @@ namespace {
 template <typename Tag,typename T>
 struct Let {
   const T value;
+};
+}
+
+
+namespace {
+template <typename Tag,typename T>
+struct Dual {
+  T &value;
 };
 }
 
@@ -570,6 +577,15 @@ template <typename Tag,typename T>
 auto let(Graph<0,List<Node<0,Var<Tag>>>>,const T& value)
 {
   return Let<Tag,T>{value};
+}
+}
+
+
+namespace {
+template <typename Tag,typename T>
+auto dual(Graph<0,List<Node<0,Var<Tag>>>>,T& value)
+{
+  return Dual<Tag,T>{value};
 }
 }
 
@@ -1815,32 +1831,15 @@ auto
 
 
 namespace {
-template <typename Graph,typename A,typename B> struct Function;
+template <typename Graph> struct Function;
 
-template <
-  size_t value_index,
-  typename Nodes,
-  typename A,
-  typename B,
-  size_t orig_a_index,
-  size_t orig_b_index
->
-struct Function<
-  Graph<value_index,Nodes>,
-  Graph<orig_a_index,List<Node<0,Var<A>>>>,
-  Graph<orig_b_index,List<Node<0,Var<B>>>>
->
+template <size_t value_index, typename Nodes>
+struct Function< Graph<value_index,Nodes> >
 {
   using ValueGraph = Graph<value_index,Nodes>;
   using AdjointGraph = decltype(adjointNodes(ValueGraph{}));
   using AdjointNodes = decltype(nodesOf(AdjointGraph{}));
   using Adjoints = decltype(adjointsOf(AdjointGraph{}));
-
-  static constexpr size_t a_index =
-    decltype(findNodeIndex(Var<A>{},AdjointNodes{}))::value;
-
-  static constexpr size_t b_index =
-    decltype(findNodeIndex(Var<B>{},AdjointNodes{}))::value;
 
   static constexpr size_t dresult_index =
     findAdjoint(Adjoints{},Indexed<value_index>{});
@@ -1848,10 +1847,13 @@ struct Function<
   static constexpr size_t n_values = sizeOf(AdjointNodes{});
   float values[n_values];
 
-  void build(float a,float b)
+  template <typename... Vars,typename... Ts>
+  void build(Let<Vars,Ts>... lets)
   {
-    values[a_index] = a;
-    values[b_index] = b;
+    ((values[
+      decltype(findNodeIndex(Var<Vars>{},AdjointNodes{}))::value
+    ] = lets.value), ...);
+
     evaluate<0,dresult_index>(AdjointNodes{},values);
   }
 
@@ -1861,14 +1863,21 @@ struct Function<
     return values[value_index];
   }
 
-  void addDeriv(float dresult,float &da,float &db)
+  template <typename... Vars,typename... Ts>
+  void addDeriv(float dresult,Dual<Vars,Ts>... duals)
   {
-    constexpr size_t da_index = findAdjoint(Adjoints{},Indexed<a_index>{});
-    constexpr size_t db_index = findAdjoint(Adjoints{},Indexed<b_index>{});
     values[dresult_index] = dresult;
     evaluate<dresult_index+1,n_values>(AdjointNodes(),values);
-    da += values[da_index];
-    db += values[db_index];
+
+    ((duals.value +=
+      values[
+        findAdjoint(
+          Adjoints{},
+          Indexed<
+            decltype(findNodeIndex(Var<Vars>{},AdjointNodes{}))::value
+          >{}
+        )
+      ]),...);
   }
 };
 }
@@ -1881,19 +1890,18 @@ static void testMulFunction()
   auto b = var<struct B>();
   auto c = a*b;
 
-  Function< decltype(c), decltype(a),decltype(b) > f;
-  f.build(5,6);
+  Function< decltype(c) > f;
+  f.build(let(a,5),let(b,6));
   float result = f.value();
   assert(result == 5*6);
   float da = 0;
   float db = 0;
-  f.addDeriv(1,da,db);
+  f.addDeriv(1,dual(a,da),dual(b,db));
   assert(da == 6);
   assert(db == 5);
 }
 
 
-#if ADD_TEST
 static void testDotFunction()
 {
   auto ax = var<struct AX>();
@@ -1906,23 +1914,45 @@ static void testDotFunction()
   auto b = vec3(bx,by,bz);
   auto c = dot(a,b);
 
-  Function<
-    decltype(c),
-    decltype(a),decltype(b)
-  > f;
+  Function< decltype(c) > f;
 
   Vec3f a_val = {1,2,3};
   Vec3f b_val = {4,5,6};
-  Vec3f da_val = {0,0,0};
-  Vec3f db_val = {0,0,0};
-  f.build(a_val,b_val);
+
+  f.build(
+    let(ax,a_val.x),
+    let(ay,a_val.y),
+    let(az,a_val.z),
+    let(bx,b_val.x),
+    let(by,b_val.y),
+    let(bz,b_val.z)
+  );
+
   float value = f.value();
   assert(value == dot(a_val,b_val));
-  f.addDeriv(1,da_val,db_val);
+
+  float dax = 0;
+  float day = 0;
+  float daz = 0;
+  float dbx = 0;
+  float dby = 0;
+  float dbz = 0;
+
+  f.addDeriv(
+    1,
+    dual(ax,dax),
+    dual(ay,day),
+    dual(az,daz),
+    dual(bx,dbx),
+    dual(by,dby),
+    dual(bz,dbz)
+  );
+
+  Vec3f da_val = {dax,day,daz};
+  Vec3f db_val = {dbx,dby,dbz};
   assert(da_val == vec3(4,5,6));
   assert(db_val == vec3(1,2,3));
 }
-#endif
 
 
 int main()
@@ -2030,7 +2060,5 @@ int main()
   testAdjointNodes();
   testDotAdjointNodes();
   testMulFunction();
-#if ADD_TEST
   testDotFunction();
-#endif
 }
