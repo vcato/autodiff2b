@@ -610,31 +610,6 @@ auto getLet2(const Let<Tag,T> &value)
 }
 
 
-#if 0
-template <typename Tag>
-getLet2<VarElem<Tag, 0, 0> >(const buildValues(Nodes, Lets ...) [
-  with Nodes = List<
-    Node<0, Var<VarElem<Tag, 0, 0> > >,
-    Node<1, Var<VarElem<Tag, 0, 1> > >,
-    Node<2, Var<VarElem<Tag, 0, 2> > >,
-    Node<3, Var<VarElem<Tag, 1, 0> > >,
-    Node<4, Var<VarElem<Tag, 1, 1> > >,
-    Node<5, Var<VarElem<Tag, 1, 2> > >,
-    Node<6, Var<VarElem<Tag, 2, 0> > >,
-    Node<7, Var<VarElem<Tag, 2, 1> > >,
-    Node<8, Var<VarElem<Tag, 2, 2> > >
-  >;
-  Lets = {
-    Let<
-      Mat33Indices<
-        Mat33Row<0, 1, 2>,
-        Mat33Row<3, 4, 5>,
-        Mat33Row<6, 7, 8>
-      >, Mat33f>
-  }]::<unnamed struct>&)’
-#endif
-
-
 namespace {
 template <typename Tag,typename Lets>
 auto getLet(Tagged<Tag>,const Lets &lets)
@@ -757,6 +732,7 @@ static auto row(const Mat33f &m,Indexed<index>)
 static auto elem(const Vec3f &v,Indexed<0>) { return v.x; }
 static auto elem(const Vec3f &v,Indexed<1>) { return v.y; }
 static auto elem(const Vec3f &v,Indexed<2>) { return v.z; }
+
 
 template <size_t r,size_t c,typename M>
 static auto elem(const M &m)
@@ -1284,6 +1260,20 @@ static auto elem(Vec3<x,y,z,Nodes>,Indexed<0>)
 }
 
 
+template <size_t x,size_t y,size_t z,typename Nodes>
+static auto elem(Vec3<x,y,z,Nodes>,Indexed<1>)
+{
+  return Graph<y,Nodes>{};
+}
+
+
+template <size_t x,size_t y,size_t z,typename Nodes>
+static auto elem(Vec3<x,y,z,Nodes>,Indexed<2>)
+{
+  return Graph<z,Nodes>{};
+}
+
+
 template <size_t row,size_t col>
 static auto elem(const Mat33f &m)
 {
@@ -1595,24 +1585,34 @@ static auto
 // Create the nodes that contain the adjoints by going through a forward
 // and reverse pass.  In the forward pass, we introduce an adjoint node
 // for each node.  In the reverse pass, we update the adjoint nodes.
-template <typename... Nodes,size_t result_index>
-static auto adjointNodes(Graph<result_index,List<Nodes...>>)
+template <
+  typename... Nodes1,
+  typename... Nodes2,
+  size_t result_index,
+  size_t dresult_index
+>
+static auto
+  adjointNodes(
+    Graph<result_index,List<Nodes1...>>,
+    Graph<dresult_index,List<Nodes2...>>
+  )
 {
   // Add a zero node to the nodes.
-  using InsertResult1 = decltype(insertNode(List<Nodes...>{},Const<Zero>{}));
+  using InsertResult1 = decltype(insertNode(List<Nodes1...>{},Const<Zero>{}));
   using NodesWithZero = decltype(newNodesOf(InsertResult1{}));
   constexpr size_t zero_index = newIndexOf(InsertResult1{});
 
   // Build the initial set of adjoints where all nodes are zero.
   using Adjoints =
     decltype(
-      makeZeroAdjoints(Indexed<sizeof...(Nodes)>{},Indexed<zero_index>{})
+      makeZeroAdjoints(Indexed<sizeof...(Nodes1)>{},Indexed<zero_index>{})
     );
 
   // Add a 1 to the nodes.
-  using InsertResult2 = decltype(insertNode(NodesWithZero{},Const<One>{}));
-  using NodesWithOne = decltype(newNodesOf(InsertResult2{}));
-  constexpr size_t one_index = newIndexOf(InsertResult2{});
+  using MergeResult = decltype(merge(NodesWithZero{},List<Nodes2...>{}));
+  using NodesWithOne = typename MergeResult::Nodes;
+  using Map = typename MergeResult::MapB;
+  constexpr size_t one_index = mapped_index<dresult_index,Map>;
 
   // Set the adjoint of our result node to 1.
   using Adjoints2 =
@@ -1629,7 +1629,7 @@ static auto adjointNodes(Graph<result_index,List<Nodes...>>)
     decltype(
       revNodes(
         AdjointGraph<Adjoints2,NodesWithOne>{},
-        List<Nodes...>{}
+        List<Nodes1...>{}
       )
     );
 
@@ -1805,13 +1805,14 @@ static void testAdjointNodes()
   auto c = var<struct C>();
   auto graph = a*b*c;
 
-  // Create the adjoint graph
-  using AdjointGraph = decltype(adjointNodes(graph));
+  auto dgraph = var<struct DGraph>();
+  using AdjointGraph = decltype(adjointNodes(graph,dgraph));
 
   // Evaluate the adjoint graph
   float a_val = 5;
   float b_val = 6;
   float c_val = 7;
+  float dgraph_val = 1;
   using NewNodes = decltype(nodesOf(AdjointGraph{}));
 
   auto values =
@@ -1819,7 +1820,8 @@ static void testAdjointNodes()
       NewNodes{},
       let(a,a_val),
       let(b,b_val),
-      let(c,c_val)
+      let(c,c_val),
+      let(dgraph,dgraph_val)
     );
 
   // Extract the derivatives
@@ -1848,11 +1850,13 @@ static void testDotAdjointNodes()
   auto graph = dot(a,b);
 
   // Create the adjoint graph
-  using AdjointGraph = decltype(adjointNodes(graph));
+  auto dgraph = var<struct DGRAPH>();
+  using AdjointGraph = decltype(adjointNodes(graph,dgraph));
 
   // Evaluate the adjoint graph
   auto a_val = vec3(1,2,3);
   auto b_val = vec3(4,5,6);
+  float dgraph_val = 1;
   using NewNodes = decltype(nodesOf(AdjointGraph{}));
 
   auto values =
@@ -1863,7 +1867,8 @@ static void testDotAdjointNodes()
       let(az,a_val.z),
       let(bx,b_val.x),
       let(by,b_val.y),
-      let(bz,b_val.z)
+      let(bz,b_val.z),
+      let(dgraph,dgraph_val)
     );
 
   // Extract the derivatives
@@ -1981,13 +1986,19 @@ auto
 
 
 namespace {
-template <typename Graph> struct Function;
+template <typename Graph,typename DGraph> struct Function;
 
-template <size_t value_index, typename Nodes>
-struct Function< Graph<value_index,Nodes> >
+template <
+  size_t value_index,
+  size_t dvalue_index,
+  typename Nodes1,
+  typename Nodes2
+>
+struct Function< Graph<value_index,Nodes1>, Graph<dvalue_index,Nodes2> >
 {
-  using ValueGraph = Graph<value_index,Nodes>;
-  using AdjointGraph = decltype(adjointNodes(ValueGraph{}));
+  using ValueGraph = Graph<value_index,Nodes1>;
+  using DValueGraph = Graph<dvalue_index,Nodes2>;
+  using AdjointGraph = decltype(adjointNodes(ValueGraph{},DValueGraph{}));
   using AdjointNodes = decltype(nodesOf(AdjointGraph{}));
   using Adjoints = decltype(adjointsOf(AdjointGraph{}));
 
@@ -2039,8 +2050,9 @@ static void testMulFunction()
   auto a = var<struct A>();
   auto b = var<struct B>();
   auto c = a*b;
+  auto dc = var<struct DC>();
 
-  Function< decltype(c) > f;
+  Function< decltype(c), decltype(dc) > f;
   f.build(let(a,5),let(b,6));
   float result = f.value();
   assert(result == 5*6);
@@ -2063,8 +2075,9 @@ static void testDotFunction()
   auto a = vec3(ax,ay,az);
   auto b = vec3(bx,by,bz);
   auto c = dot(a,b);
+  auto dc = var<struct DC>();
 
-  Function< decltype(c) > f;
+  Function< decltype(c), decltype(dc) > f;
 
   Vec3f a_val = {1,2,3};
   Vec3f b_val = {4,5,6};
