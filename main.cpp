@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #define ADD_QR_DECOMP 0
+#define ADD_TEST 0
 
 
 using std::cerr;
@@ -136,6 +137,7 @@ template <size_t index> struct YValue {};
 template <size_t index> struct ZValue {};
 template <size_t index,typename Expr> struct Node {};
 template <size_t mat_index,size_t row,size_t col> struct Elem {};
+template <typename Tag,size_t row,size_t col> struct VarElem {};
 
 struct Empty {};
 struct None {};
@@ -608,11 +610,166 @@ auto getLet2(const Let<Tag,T> &value)
 }
 
 
+#if 0
+template <typename Tag>
+getLet2<VarElem<Tag, 0, 0> >(const buildValues(Nodes, Lets ...) [
+  with Nodes = List<
+    Node<0, Var<VarElem<Tag, 0, 0> > >,
+    Node<1, Var<VarElem<Tag, 0, 1> > >,
+    Node<2, Var<VarElem<Tag, 0, 2> > >,
+    Node<3, Var<VarElem<Tag, 1, 0> > >,
+    Node<4, Var<VarElem<Tag, 1, 1> > >,
+    Node<5, Var<VarElem<Tag, 1, 2> > >,
+    Node<6, Var<VarElem<Tag, 2, 0> > >,
+    Node<7, Var<VarElem<Tag, 2, 1> > >,
+    Node<8, Var<VarElem<Tag, 2, 2> > >
+  >;
+  Lets = {
+    Let<
+      Mat33Indices<
+        Mat33Row<0, 1, 2>,
+        Mat33Row<3, 4, 5>,
+        Mat33Row<6, 7, 8>
+      >, Mat33f>
+  }]::<unnamed struct>&)’
+#endif
+
+
 namespace {
 template <typename Tag,typename Lets>
 auto getLet(Tagged<Tag>,const Lets &lets)
 {
+  // This is searching through lets to find one that matches Let<Tag,T>
+  // but our lets are of the form Let<Mat33Indices<...>,T>
   return getLet2<Tag>(lets);
+}
+}
+
+
+namespace {
+struct Mat33f {
+  const float values[3][3];
+
+  Mat33f(const float (&m)[3][3])
+  : values{
+      {m[0][0],m[0][1],m[0][2]},
+      {m[1][0],m[1][1],m[1][2]},
+      {m[2][0],m[2][1],m[2][2]},
+    }
+  {
+  }
+
+  bool operator==(const Mat33f &arg) const
+  {
+    for (int i=0; i!=3; ++i) {
+      for (int j=0; j!=3; ++j) {
+        if (values[i][j] != arg.values[i][j]) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+};
+}
+
+
+namespace {
+struct Vec3f {
+  const float x,y,z;
+
+  bool operator==(const Vec3f &arg) const
+  {
+    return x==arg.x && y==arg.y && z==arg.z;
+  }
+};
+}
+
+
+namespace {
+Mat33f mat33(Vec3f r1,Vec3f r2,Vec3f r3)
+{
+  float values[3][3] = {
+    {r1.x,r1.y,r1.z},
+    {r2.x,r2.y,r2.z},
+    {r3.x,r3.y,r3.z},
+  };
+
+  return Mat33f{values};
+}
+}
+
+
+namespace {
+
+
+template <typename Row0,typename Row1,typename Row2,typename Nodes>
+struct Mat33
+{
+  static Mat33f eval(const Vec3f &row0,const Vec3f &row1,const Vec3f &row2)
+  {
+    return mat33(row0,row1,row2);
+  }
+};
+
+
+template <size_t x,size_t y,size_t z> struct Mat33Row;
+
+
+}
+
+
+namespace {
+template <size_t x_index,size_t y_index,size_t z_index,typename Nodes>
+struct Vec3
+{
+  static Vec3f eval(float x,float y,float z) { return Vec3f{x,y,z}; }
+};
+}
+
+
+template <
+  size_t m00,size_t m01,size_t m02,typename Row1,typename Row2,typename Nodes
+>
+static auto row(const Mat33<Mat33Row<m00,m01,m02>,Row1,Row2,Nodes>,Indexed<0>)
+{
+  return Vec3<m00,m01,m02,Nodes>{};
+}
+
+
+static Vec3f vec3(float x,float y,float z)
+{
+  return Vec3f{x,y,z};
+}
+
+
+template <size_t index>
+static auto row(const Mat33f &m,Indexed<index>)
+{
+  float x = m.values[index][0];
+  float y = m.values[index][1];
+  float z = m.values[index][2];
+  return vec3(x,y,z);
+}
+
+
+static auto elem(const Vec3f &v,Indexed<0>) { return v.x; }
+static auto elem(const Vec3f &v,Indexed<1>) { return v.y; }
+static auto elem(const Vec3f &v,Indexed<2>) { return v.z; }
+
+template <size_t r,size_t c,typename M>
+static auto elem(const M &m)
+{
+  return elem(row(m,Indexed<r>{}),Indexed<c>{});
+}
+
+
+namespace {
+template <typename Tag,size_t i,size_t j,typename Lets>
+auto getLet(Tagged<VarElem<Tag,i,j>>,const Lets &lets)
+{
+  return elem<i,j>(getLet2<Tag>(lets));
 }
 }
 
@@ -632,24 +789,6 @@ auto getValue(Indexed<index>,const List &list)
 {
   return getValue2<index>(list);
 }
-}
-
-
-namespace {
-struct Vec3f {
-  const float x,y,z;
-
-  bool operator==(const Vec3f &arg) const
-  {
-    return x==arg.x && y==arg.y && z==arg.z;
-  }
-};
-}
-
-
-static Vec3f vec3(float x,float y,float z)
-{
-  return Vec3f{x,y,z};
 }
 
 
@@ -681,15 +820,6 @@ Vec3f operator/(const Vec3f &a,float b)
 }
 }
 #endif
-
-
-namespace {
-template <size_t x_index,size_t y_index,size_t z_index,typename Nodes>
-struct Vec3
-{
-  static Vec3f eval(float x,float y,float z) { return Vec3f{x,y,z}; }
-};
-}
 
 
 namespace {
@@ -904,64 +1034,57 @@ static auto vec3(
 
 
 namespace {
-struct Mat33f {
-  const float values[3][3];
+template <typename Row0,typename Row1,typename Row2> struct Mat33Indices { };
+}
 
-  Mat33f(const float (&m)[3][3])
-  : values{
-      {m[0][0],m[0][1],m[0][2]},
-      {m[1][0],m[1][1],m[1][2]},
-      {m[2][0],m[2][1],m[2][2]},
-    }
-  {
-  }
 
-  bool operator==(const Mat33f &arg) const
-  {
-    for (int i=0; i!=3; ++i) {
-      for (int j=0; j!=3; ++j) {
-        if (values[i][j] != arg.values[i][j]) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  }
-};
+template <typename Tag>
+auto
+  let(
+    Mat33<
+      Mat33Row<0,1,2>,
+      Mat33Row<3,4,5>,
+      Mat33Row<6,7,8>,
+      List<
+        Node<0,Var<VarElem<Tag,0,0>>>,
+        Node<1,Var<VarElem<Tag,0,1>>>,
+        Node<2,Var<VarElem<Tag,0,2>>>,
+        Node<3,Var<VarElem<Tag,1,0>>>,
+        Node<4,Var<VarElem<Tag,1,1>>>,
+        Node<5,Var<VarElem<Tag,1,2>>>,
+        Node<6,Var<VarElem<Tag,2,0>>>,
+        Node<7,Var<VarElem<Tag,2,1>>>,
+        Node<8,Var<VarElem<Tag,2,2>>>
+      >
+    >,
+    const Mat33f &value
+  )
+{
+  return Let<Tag,Mat33f>{value};
 }
 
 
 namespace {
-Mat33f mat33(Vec3f r1,Vec3f r2,Vec3f r3)
+template <typename Tag>
+auto mat33Var()
 {
-  float values[3][3] = {
-    {r1.x,r1.y,r1.z},
-    {r2.x,r2.y,r2.z},
-    {r3.x,r3.y,r3.z},
-  };
-
-  return Mat33f{values};
+  return Mat33<
+    Mat33Row<0,1,2>,
+    Mat33Row<3,4,5>,
+    Mat33Row<6,7,8>,
+    List<
+      Node<0,Var<VarElem<Tag,0,0>>>,
+      Node<1,Var<VarElem<Tag,0,1>>>,
+      Node<2,Var<VarElem<Tag,0,2>>>,
+      Node<3,Var<VarElem<Tag,1,0>>>,
+      Node<4,Var<VarElem<Tag,1,1>>>,
+      Node<5,Var<VarElem<Tag,1,2>>>,
+      Node<6,Var<VarElem<Tag,2,0>>>,
+      Node<7,Var<VarElem<Tag,2,1>>>,
+      Node<8,Var<VarElem<Tag,2,2>>>
+    >
+  >{};
 }
-}
-
-
-namespace {
-
-
-template <typename Row0,typename Row1,typename Row2,typename Nodes>
-struct Mat33
-{
-  static Mat33f eval(const Vec3f &row0,const Vec3f &row1,const Vec3f &row2)
-  {
-    return mat33(row0,row1,row2);
-  }
-};
-
-
-template <size_t x,size_t y,size_t z> struct Mat33Row;
-
-
 }
 
 
@@ -1131,6 +1254,33 @@ template <size_t row,size_t col,size_t mat_index,typename Nodes>
 static auto elem(Graph<mat_index,Nodes>)
 {
   return mergedGraph(Nodes{},Elem<mat_index,row,col>{});
+}
+
+
+template <
+  size_t m10,size_t m11,size_t m12,typename Row0,typename Row2,typename Nodes
+>
+static auto
+  row(const Mat33<Row0,Mat33Row<m10,m11,m12>,Row2,Nodes>,Indexed<1>)
+{
+  return Vec3<m10,m11,m12,Nodes>{};
+}
+
+
+template <
+  size_t m20,size_t m21,size_t m22,typename Row0,typename Row1,typename Nodes
+>
+static auto
+  row(const Mat33<Row0,Row1,Mat33Row<m20,m21,m22>,Nodes>,Indexed<2>)
+{
+  return Vec3<m20,m21,m22,Nodes>{};
+}
+
+
+template <size_t x,size_t y,size_t z,typename Nodes>
+static auto elem(Vec3<x,y,z,Nodes>,Indexed<0>)
+{
+  return Graph<x,Nodes>{};
 }
 
 
@@ -1955,6 +2105,34 @@ static void testDotFunction()
 }
 
 
+#if ADD_TEST
+static void testQRDecompFunction()
+{
+  auto a = mat33Var<struct A>();
+  auto qr = qrDecomposition(a);
+
+  Function< decltype(qr) > f;
+
+  Vec3f a_val = {1,2,3};
+  Vec3f b_val = {4,5,6};
+
+  f.build(let(a,a_val));
+
+  auto value = f.value();
+  assert(value == qrDecomposition(a_val));
+
+  Mat33f da = 0;
+
+  f.addDeriv(dqr,da);
+
+  // Verify that the derivatives are correct.
+  // da is d(error)/d(a) given d(error)/d(qr)
+  // How do we verify this?
+  // fda[i][j] = sum{i2,j2}(d(qr[i2][j2])/d(a[i][j])*dqr[i2][j2])
+}
+#endif
+
+
 int main()
 {
   testFindNodeIndex();
@@ -2020,7 +2198,7 @@ int main()
     assert(result == expected_result);
   }
   {
-    auto a = var<struct A>();
+    auto a = mat33Var<struct A>();
     auto aT0 = col<0>(a);
     Vec3f row0 = vec3(1,2,3);
     Vec3f row1 = vec3(4,5,6);
@@ -2061,4 +2239,7 @@ int main()
   testDotAdjointNodes();
   testMulFunction();
   testDotFunction();
+#if ADD_TEST
+  testQRDecompFunction();
+#endif
 }
