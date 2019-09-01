@@ -17,8 +17,7 @@ namespace {
 
 template <typename Tag> struct Var { };
 template <typename ValueType> struct Const { };
-
-
+struct External {};
 template <typename Tag> struct Tagged {};
 
 }
@@ -47,7 +46,7 @@ template <size_t expr_index,typename Nodes> struct Graph
 template <size_t expr_index,typename Nodes>
 constexpr auto indexOf(Graph<expr_index,Nodes>)
 {
-  return expr_index;
+  return Indexed<expr_index>{};
 }
 
 
@@ -960,7 +959,11 @@ auto
 
 namespace {
 template <
-  typename Nodes,size_t x_index,size_t y_index,size_t z_index,typename... Lets
+  typename Nodes,
+  size_t x_index,
+  size_t y_index,
+  size_t z_index,
+  typename... Lets
 >
 auto
   eval(
@@ -1014,6 +1017,7 @@ template <typename Row0,typename Row1,typename Row2> struct Mat33Indices { };
 }
 
 
+namespace {
 template <typename Tag>
 auto
   let(
@@ -1037,6 +1041,7 @@ auto
   )
 {
   return Let<Tag,Mat33f>{value};
+}
 }
 
 
@@ -1588,19 +1593,21 @@ static auto
 template <
   typename... Nodes1,
   typename... Nodes2,
-  size_t result_index,
-  size_t dresult_index
+  size_t result_index
+    // I think this needs to be generalized to take a list of result
+    // indices.
 >
 static auto
   adjointNodes(
-    Graph<result_index,List<Nodes1...>>,
-    Graph<dresult_index,List<Nodes2...>>
+    Indexed<result_index>,
+    List<Nodes1...>
   )
 {
-  // Add a zero node to the nodes.
-  using InsertResult1 = decltype(insertNode(List<Nodes1...>{},Const<Zero>{}));
-  using NodesWithZero = decltype(newNodesOf(InsertResult1{}));
-  constexpr size_t zero_index = newIndexOf(InsertResult1{});
+  // Add a zero node to the nodes if we don't have one, since we'll need
+  // to initialize all the adjoints to this.
+  using InsertResult = decltype(insertNode(List<Nodes1...>{},Const<Zero>{}));
+  using NodesWithZero = decltype(newNodesOf(InsertResult{}));
+  constexpr size_t zero_index = newIndexOf(InsertResult{});
 
   // Build the initial set of adjoints where all nodes are zero.
   using Adjoints =
@@ -1608,19 +1615,16 @@ static auto
       makeZeroAdjoints(Indexed<sizeof...(Nodes1)>{},Indexed<zero_index>{})
     );
 
-  // Add a 1 to the nodes.
-  using MergeResult = decltype(merge(NodesWithZero{},List<Nodes2...>{}));
-  using NodesWithOne = typename MergeResult::Nodes;
-  using Map = typename MergeResult::MapB;
-  constexpr size_t one_index = mapped_index<dresult_index,Map>;
+  constexpr size_t new_dresult_index = listSize<NodesWithZero>;
+  using NodesWithDResult = decltype(addNode(NodesWithZero{},External{}));
 
-  // Set the adjoint of our result node to 1.
+  // Set the adjoint of our result node
   using Adjoints2 =
     decltype(
       setAdjoint(
         Adjoints{},
         /*adjoint_node*/Indexed<result_index>{},
-        /*value*/Indexed<one_index>{}
+        /*value*/Indexed<new_dresult_index>{}
       )
     );
 
@@ -1628,7 +1632,7 @@ static auto
   using RevResult =
     decltype(
       revNodes(
-        AdjointGraph<Adjoints2,NodesWithOne>{},
+        AdjointGraph<Adjoints2,NodesWithDResult>{},
         List<Nodes1...>{}
       )
     );
@@ -1797,133 +1801,28 @@ static auto adjointValue(Variable,const Values &values,AdjointGraph)
 }
 
 
-static void testAdjointNodes()
+template <typename Variable,size_t n_values,typename AdjointGraph>
+static auto adjointValue(Variable,const float (&values)[n_values],AdjointGraph)
 {
-  // Define our graph
-  auto a = var<struct A>();
-  auto b = var<struct B>();
-  auto c = var<struct C>();
-  auto graph = a*b*c;
-
-  auto dgraph = var<struct DGraph>();
-  using AdjointGraph = decltype(adjointNodes(graph,dgraph));
-
-  // Evaluate the adjoint graph
-  float a_val = 5;
-  float b_val = 6;
-  float c_val = 7;
-  float dgraph_val = 1;
-  using NewNodes = decltype(nodesOf(AdjointGraph{}));
-
-  auto values =
-    buildValues(
-      NewNodes{},
-      let(a,a_val),
-      let(b,b_val),
-      let(c,c_val),
-      let(dgraph,dgraph_val)
-    );
-
-  // Extract the derivatives
-  float da_val = adjointValue(a,values,AdjointGraph{});
-  float db_val = adjointValue(b,values,AdjointGraph{});
-  float dc_val = adjointValue(c,values,AdjointGraph{});
-
-  // Verify
-  assert(da_val == b_val*c_val);
-  assert(db_val == a_val*c_val);
-  assert(dc_val == a_val*b_val);
+  using Index = decltype(varAdjoint(Variable{},AdjointGraph{}));
+  assert(Index::value < n_values);
+  return values[Index::value];
 }
 
 
-static void testDotAdjointNodes()
+template <typename Graph,size_t n_nodes,typename AdjointNodes>
+static void
+  setValue(Graph,float value,float (&values)[n_nodes],AdjointNodes)
 {
-  // Define our graph
-  auto ax = var<struct AX>();
-  auto ay = var<struct AY>();
-  auto az = var<struct AZ>();
-  auto bx = var<struct BX>();
-  auto by = var<struct BY>();
-  auto bz = var<struct BZ>();
-  auto a = vec3(ax,ay,az);
-  auto b = vec3(bx,by,bz);
-  auto graph = dot(a,b);
-
-  // Create the adjoint graph
-  auto dgraph = var<struct DGRAPH>();
-  using AdjointGraph = decltype(adjointNodes(graph,dgraph));
-
-  // Evaluate the adjoint graph
-  auto a_val = vec3(1,2,3);
-  auto b_val = vec3(4,5,6);
-  float dgraph_val = 1;
-  using NewNodes = decltype(nodesOf(AdjointGraph{}));
-
-  auto values =
-    buildValues(
-      NewNodes{},
-      let(ax,a_val.x),
-      let(ay,a_val.y),
-      let(az,a_val.z),
-      let(bx,b_val.x),
-      let(by,b_val.y),
-      let(bz,b_val.z),
-      let(dgraph,dgraph_val)
-    );
-
-  // Extract the derivatives
-  float dax_val = adjointValue(ax,values,AdjointGraph{});
-  float day_val = adjointValue(ay,values,AdjointGraph{});
-  float daz_val = adjointValue(az,values,AdjointGraph{});
-  float dbx_val = adjointValue(bx,values,AdjointGraph{});
-  float dby_val = adjointValue(by,values,AdjointGraph{});
-  float dbz_val = adjointValue(bz,values,AdjointGraph{});
-  Vec3f da_val = vec3(dax_val,day_val,daz_val);
-  Vec3f db_val = vec3(dbx_val,dby_val,dbz_val);
-
-  // Verify
-  assert(da_val == vec3(4,5,6));
-  assert(db_val == vec3(1,2,3));
+  constexpr size_t index = decltype(indexOf(Graph{}))::value;
+  using Nodes = decltype(nodesOf(Graph{}));
+  using MergeResult = decltype(merge(AdjointNodes{},Nodes{}));
+  using Map = typename MergeResult::MapB;
+  constexpr size_t mi = mapped_index<index,Map>;
+  values[mi] = value;
 }
 
 
-namespace {
-
-// Variable values are set externally, so there's nothing to do here.
-// Not sure if this is the right thing to do.  Might be better to have
-// a let list instead.
-template <size_t n,size_t index,typename A>
-void setValue(float (&/*values*/)[n],Node<index,Var<A>>)
-{
-}
-
-
-template <size_t n,size_t index,typename A>
-void setValue(float (&values)[n],Node<index,Const<A>>)
-{
-  values[index] = A::value();
-}
-
-
-template <size_t n,size_t index,size_t a,size_t b>
-void setValue(float (&values)[n],Node<index,Mul<a,b>>)
-{
-  values[index] = values[a] * values[b];
-}
-
-
-template <size_t n,size_t index,size_t a,size_t b>
-void setValue(float (&values)[n],Node<index,Add<a,b>>)
-{
-  values[index] = values[a] + values[b];
-}
-
-
-}
-
-
-
-#if 1
 namespace {
 
 // Done
@@ -1981,64 +1880,222 @@ auto
 }
 
 }
-#endif
 
+
+
+static void testAdjointNodes()
+{
+  // Define our graph
+  auto a = var<struct A>();
+  auto b = var<struct B>();
+  auto c = var<struct C>();
+  auto graph = a*b*c;
+  using AdjointGraph = decltype(adjointNodes(indexOf(graph),nodesOf(graph)));
+  using Adjoints = decltype(adjointsOf(AdjointGraph{}));
+
+  float a_val = 5;
+  float b_val = 6;
+  float c_val = 7;
+  float dgraph_val = 1;
+  using NewNodes = decltype(nodesOf(AdjointGraph{}));
+  using Adjoints = decltype(adjointsOf(AdjointGraph{}));
+  static constexpr size_t graph_index = decltype(indexOf(graph))::value;
+
+  constexpr size_t dgraph_index =
+    findAdjoint(Adjoints{},Indexed<graph_index>{});
+
+  static constexpr size_t n_values = sizeOf(NewNodes{});
+  float values[n_values];
+
+  // Set the inputs
+  setValue(a,a_val,values,NewNodes{});
+  setValue(b,b_val,values,NewNodes{});
+  setValue(c,c_val,values,NewNodes{});
+
+  // Evaluate the normal part of the graph
+  evaluate<0,dgraph_index>(NewNodes{},values);
+
+  // Verify the output
+  assert(values[graph_index] == a_val*b_val*c_val);
+
+  // Set the derivative of the output
+  values[dgraph_index] = dgraph_val;
+
+  // Evaluate the rest of the graph
+  evaluate<dgraph_index+1,n_values>(NewNodes{},values);
+
+  // Extract the derivatives
+  float da_val = adjointValue(a,values,AdjointGraph{});
+  float db_val = adjointValue(b,values,AdjointGraph{});
+  float dc_val = adjointValue(c,values,AdjointGraph{});
+
+  // Verify
+  assert(da_val == b_val*c_val);
+  assert(db_val == a_val*c_val);
+  assert(dc_val == a_val*b_val);
+}
+
+
+static void testDotAdjointNodes()
+{
+  // Define our graph
+  auto ax = var<struct AX>();
+  auto ay = var<struct AY>();
+  auto az = var<struct AZ>();
+  auto bx = var<struct BX>();
+  auto by = var<struct BY>();
+  auto bz = var<struct BZ>();
+  auto a = vec3(ax,ay,az);
+  auto b = vec3(bx,by,bz);
+  auto graph = dot(a,b);
+  constexpr size_t graph_index = decltype(indexOf(graph))::value;
+
+  using AdjointGraph =
+    decltype(adjointNodes(Indexed<graph_index>{},nodesOf(graph)));
+
+  // Evaluate the adjoint graph
+  auto a_val = vec3(1,2,3);
+  auto b_val = vec3(4,5,6);
+  float dgraph_val = 1;
+  using NewNodes = decltype(nodesOf(AdjointGraph{}));
+  using Adjoints = decltype(adjointsOf(AdjointGraph{}));
+  static constexpr size_t n_values = sizeOf(NewNodes{});
+  float values[n_values];
+  setValue(ax,a_val.x,values,NewNodes{});
+  setValue(ay,a_val.y,values,NewNodes{});
+  setValue(az,a_val.z,values,NewNodes{});
+  setValue(bx,b_val.x,values,NewNodes{});
+  setValue(by,b_val.y,values,NewNodes{});
+  setValue(bz,b_val.z,values,NewNodes{});
+
+  constexpr size_t dgraph_index =
+    findAdjoint(Adjoints{},Indexed<graph_index>{});
+
+  evaluate<0,dgraph_index>(NewNodes{},values);
+  values[dgraph_index] = dgraph_val;
+  evaluate<dgraph_index+1,n_values>(NewNodes{},values);
+
+  // Extract the derivatives
+  float dax_val = adjointValue(ax,values,AdjointGraph{});
+  float day_val = adjointValue(ay,values,AdjointGraph{});
+  float daz_val = adjointValue(az,values,AdjointGraph{});
+  float dbx_val = adjointValue(bx,values,AdjointGraph{});
+  float dby_val = adjointValue(by,values,AdjointGraph{});
+  float dbz_val = adjointValue(bz,values,AdjointGraph{});
+  Vec3f da_val = vec3(dax_val,day_val,daz_val);
+  Vec3f db_val = vec3(dbx_val,dby_val,dbz_val);
+
+  // Verify
+  assert(da_val == vec3(4,5,6));
+  assert(db_val == vec3(1,2,3));
+}
 
 
 namespace {
-template <typename Graph,typename DGraph> struct Function;
 
-template <
-  size_t value_index,
-  size_t dvalue_index,
-  typename Nodes1,
-  typename Nodes2
->
-struct Function< Graph<value_index,Nodes1>, Graph<dvalue_index,Nodes2> >
+// Variable values are set externally, so there's nothing to do here.
+// Not sure if this is the right thing to do.  Might be better to have
+// a let list instead.
+template <size_t n,size_t index,typename A>
+void setValue(float (&/*values*/)[n],Node<index,Var<A>>)
+{
+}
+
+
+template <size_t n,size_t index,typename A>
+void setValue(float (&values)[n],Node<index,Const<A>>)
+{
+  values[index] = A::value();
+}
+
+
+template <size_t n,size_t index,size_t a,size_t b>
+void setValue(float (&values)[n],Node<index,Mul<a,b>>)
+{
+  values[index] = values[a] * values[b];
+}
+
+
+template <size_t n,size_t index,size_t a,size_t b>
+void setValue(float (&values)[n],Node<index,Add<a,b>>)
+{
+  values[index] = values[a] + values[b];
+}
+
+}
+
+
+namespace {
+template <typename Graph> struct Function;
+
+template <size_t value_index,typename Nodes1 >
+struct Function< Graph<value_index,Nodes1> >
 {
   using ValueGraph = Graph<value_index,Nodes1>;
-  using DValueGraph = Graph<dvalue_index,Nodes2>;
-  using AdjointGraph = decltype(adjointNodes(ValueGraph{},DValueGraph{}));
+
+  using AdjointGraph =
+    decltype(
+      adjointNodes(
+        indexOf(ValueGraph{}),
+        nodesOf(ValueGraph{})
+      )
+    );
+
   using AdjointNodes = decltype(nodesOf(AdjointGraph{}));
   using Adjoints = decltype(adjointsOf(AdjointGraph{}));
 
-  static constexpr size_t dresult_index =
-    findAdjoint(Adjoints{},Indexed<value_index>{});
+  template <size_t index,typename Nodes>
+  static constexpr size_t mappedIndex(Graph<index,Nodes>)
+  {
+    using MergeResult = decltype(merge(AdjointNodes{},Nodes{}));
+    using Map = typename MergeResult::MapB;
+    return mapped_index<index,Map>;
+  }
+
+  template <typename G>
+  static constexpr size_t derivIndex(G)
+  {
+    constexpr size_t index = mappedIndex(G{});
+    return findAdjoint(Adjoints{},Indexed<index>{});
+  }
+
+  static constexpr size_t dresult_index = derivIndex(ValueGraph{});
 
   static constexpr size_t n_values = sizeOf(AdjointNodes{});
   float values[n_values];
 
-  template <typename... Vars,typename... Ts>
-  void build(Let<Vars,Ts>... lets)
+  template <typename Graph,typename T>
+  void set(Graph,const T& value)
   {
-    ((values[
-      decltype(findNodeIndex(Var<Vars>{},AdjointNodes{}))::value
-    ] = lets.value), ...);
-
-    evaluate<0,dresult_index>(AdjointNodes{},values);
+    setValue(Graph{},value,values,AdjointNodes{});
   }
 
-  auto value() const
+  void evaluate()
   {
-    static_assert(value_index < n_values);
-    return values[value_index];
+    ::evaluate<0,dresult_index>(AdjointNodes{},values);
   }
 
-  template <typename... Vars,typename... Ts>
-  void addDeriv(float dresult,Dual<Vars,Ts>... duals)
+  template <typename Graph>
+  auto get(Graph) const
   {
-    values[dresult_index] = dresult;
-    evaluate<dresult_index+1,n_values>(AdjointNodes(),values);
+    return values[mappedIndex(Graph{})];
+  }
 
-    ((duals.value +=
-      values[
-        findAdjoint(
-          Adjoints{},
-          Indexed<
-            decltype(findNodeIndex(Var<Vars>{},AdjointNodes{}))::value
-          >{}
-        )
-      ]),...);
+  template <typename Graph,typename T>
+  void setDeriv(Graph,const T& value)
+  {
+    values[derivIndex(Graph{})] = value;
+  }
+
+  void evaluateDerivs()
+  {
+    ::evaluate<dresult_index+1,n_values>(AdjointNodes(),values);
+  }
+
+  template <typename Graph>
+  float getDeriv(Graph) const
+  {
+    return values[derivIndex(Graph{})];
   }
 };
 }
@@ -2050,15 +2107,17 @@ static void testMulFunction()
   auto a = var<struct A>();
   auto b = var<struct B>();
   auto c = a*b;
-  auto dc = var<struct DC>();
-
-  Function< decltype(c), decltype(dc) > f;
-  f.build(let(a,5),let(b,6));
-  float result = f.value();
-  assert(result == 5*6);
-  float da = 0;
-  float db = 0;
-  f.addDeriv(1,dual(a,da),dual(b,db));
+  float a_val = 5;
+  float b_val = 6;
+  Function< decltype(c) > f;
+  f.set(a,a_val);
+  f.set(b,b_val);
+  f.evaluate();
+  assert(f.get(c) == a_val*b_val);
+  f.setDeriv(c,1);
+  f.evaluateDerivs();
+  float da = f.getDeriv(a);
+  float db = f.getDeriv(b);
   assert(da == 6);
   assert(db == 5);
 }
@@ -2075,41 +2134,29 @@ static void testDotFunction()
   auto a = vec3(ax,ay,az);
   auto b = vec3(bx,by,bz);
   auto c = dot(a,b);
-  auto dc = var<struct DC>();
-
-  Function< decltype(c), decltype(dc) > f;
-
+  Function< decltype(c) > f;
   Vec3f a_val = {1,2,3};
   Vec3f b_val = {4,5,6};
+  f.set(ax,a_val.x);
+  f.set(ay,a_val.y);
+  f.set(az,a_val.z);
+  f.set(bx,b_val.x);
+  f.set(by,b_val.y);
+  f.set(bz,b_val.z);
+  f.evaluate();
 
-  f.build(
-    let(ax,a_val.x),
-    let(ay,a_val.y),
-    let(az,a_val.z),
-    let(bx,b_val.x),
-    let(by,b_val.y),
-    let(bz,b_val.z)
-  );
-
-  float value = f.value();
+  float value = f.get(c);
   assert(value == dot(a_val,b_val));
 
-  float dax = 0;
-  float day = 0;
-  float daz = 0;
-  float dbx = 0;
-  float dby = 0;
-  float dbz = 0;
 
-  f.addDeriv(
-    1,
-    dual(ax,dax),
-    dual(ay,day),
-    dual(az,daz),
-    dual(bx,dbx),
-    dual(by,dby),
-    dual(bz,dbz)
-  );
+  f.setDeriv(c,1);
+  f.evaluateDerivs();
+  float dax = f.getDeriv(ax);
+  float day = f.getDeriv(ay);
+  float daz = f.getDeriv(az);
+  float dbx = f.getDeriv(bx);
+  float dby = f.getDeriv(by);
+  float dbz = f.getDeriv(bz);
 
   Vec3f da_val = {dax,day,daz};
   Vec3f db_val = {dbx,dby,dbz};
@@ -2123,22 +2170,27 @@ static void testQRDecompFunction()
 {
   auto a = mat33Var<struct A>();
   auto qr = qrDecomposition(a);
+  auto dqr = dqVar<struct DQR>();
 
-  Function< decltype(qr) > f;
+  // Here, it seems like we want to get the node indices from qr and
+  // create a function for those.  We need a way to set the inputs,
+  // evaluate the function, get the outputs, set the derivatives of the
+  // outputs, evaluate the derivatives, and get the derivatives of the inputs.
+  Function< decltype(nodesOf(qr)) > f;
 
-  Vec3f a_val = {1,2,3};
-  Vec3f b_val = {4,5,6};
+  Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec(7,8,9));
 
-  f.build(let(a,a_val));
-
-  auto value = f.value();
-  assert(value == qrDecomposition(a_val));
-
-  Mat33f da = 0;
-
-  f.addDeriv(dqr,da);
+  f.setInputs(a,a_val);
+  f.evaluate();
+  auto qr_val = f.getOutputs(qr);
+  assert(qr_val == qrDecomposition(a_val));
+  f.setOutputDerivs();
+  f.evaluateDerivs();
+  Mat33f da = f.getInputDerivs(a);
 
   // Verify that the derivatives are correct.
+  assert(false);
+
   // da is d(error)/d(a) given d(error)/d(qr)
   // How do we verify this?
   // fda[i][j] = sum{i2,j2}(d(qr[i2][j2])/d(a[i][j])*dqr[i2][j2])

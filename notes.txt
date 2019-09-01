@@ -80,23 +80,3 @@ template <size_t... args>
 using DoubleMap = MakeDoubleMap<Compute<args>,MakeSequence<args>>::type;
 
 I don't know if this can be used to simplify the adjoint calculations.
----
-How do we generalize Function so that it can be used for non-scalar values?
-When we are working with scalar-valued functions, we can just set the
-result derivative to 1 when calculating the adjoints because we can always
-scale the result.  But when we are working with non-scalar valued functions,
-we need the actual output derivatives to calculate the input derivatives.
-
-I think this means that instead of setting the derivative of the result to 1,
-we'll have it be a variable.
-
-It seems like we want a function to have an array of values as input
-and an array of values as output.  It seems like we need a type which
-describes the relevant indices.
-
-I think a place to start would be to change adjointNodes() to take a
-node which is the adjoint index of the result.
-
-Not sure if there is much point in passing the adjoint index of the result.
-We could just add an adjoint index for each.
-It may make it easier later to give the adjoints particular values.
