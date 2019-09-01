@@ -2009,6 +2009,12 @@ void setValue(float (&values)[n],Node<index,Const<A>>)
 }
 
 
+template <size_t n,size_t index>
+void setValue(float (&)[n],Node<index,External>)
+{
+}
+
+
 template <size_t n,size_t index,size_t a,size_t b>
 void setValue(float (&values)[n],Node<index,Mul<a,b>>)
 {
@@ -2028,16 +2034,16 @@ void setValue(float (&values)[n],Node<index,Add<a,b>>)
 namespace {
 template <typename Graph> struct Function;
 
-template <size_t value_index,typename Nodes1 >
-struct Function< Graph<value_index,Nodes1> >
+template <size_t value_index,typename ValueNodes>
+struct Function< Graph<value_index,ValueNodes> >
 {
-  using ValueGraph = Graph<value_index,Nodes1>;
+  using ValueGraph = Graph<value_index,ValueNodes>;
 
   using AdjointGraph =
     decltype(
       adjointNodes(
-        indexOf(ValueGraph{}),
-        nodesOf(ValueGraph{})
+        Indexed<value_index>{},
+        ValueNodes{}
       )
     );
 
@@ -2072,7 +2078,8 @@ struct Function< Graph<value_index,Nodes1> >
 
   void evaluate()
   {
-    ::evaluate<0,dresult_index>(AdjointNodes{},values);
+    constexpr size_t n_value_nodes = listSize<ValueNodes>;
+    ::evaluate<0,n_value_nodes>(AdjointNodes{},values);
   }
 
   template <typename Graph>
@@ -2089,7 +2096,8 @@ struct Function< Graph<value_index,Nodes1> >
 
   void evaluateDerivs()
   {
-    ::evaluate<dresult_index+1,n_values>(AdjointNodes(),values);
+    constexpr size_t n_value_nodes = listSize<ValueNodes>;
+    ::evaluate<n_value_nodes,n_values>(AdjointNodes(),values);
   }
 
   template <typename Graph>
