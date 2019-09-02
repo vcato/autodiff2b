@@ -724,6 +724,16 @@ struct Vec3Indices {};
 }
 
 
+template <size_t x,size_t y,size_t z,typename Map>
+static auto mappedIndices(Vec3Indices<x,y,z>,Map)
+{
+  constexpr size_t new_x = mapped_index<x,Map>;
+  constexpr size_t new_y = mapped_index<y,Map>;
+  constexpr size_t new_z = mapped_index<z,Map>;
+  return Vec3Indices<new_x,new_y,new_z>{};
+}
+
+
 template <typename Row0,typename Row1,typename Row2,typename Nodes>
 static auto row(const Graph<Mat33Indices<Row0,Row1,Row2>,Nodes>,Indexed<0>)
 {
@@ -1173,16 +1183,17 @@ auto evalExpr(Elem<mat_index,row,col>, const Values &values,const Lets &)
 
 
 template <
-  size_t r0x,size_t r0y,size_t r0z,
-  size_t r1x,size_t r1y,size_t r1z,
-  size_t r2x,size_t r2y,size_t r2z,
+  typename R0,
+  typename R1,
+  typename R2,
   typename Row0Nodes,typename Row1Nodes,typename Row2Nodes
 >
-static auto mat33(
-  Graph<Vec3Indices<r0x,r0y,r0z>,Row0Nodes>,
-  Graph<Vec3Indices<r1x,r1y,r1z>,Row1Nodes>,
-  Graph<Vec3Indices<r2x,r2y,r2z>,Row2Nodes>
-)
+static auto
+  mat33(
+    Graph<R0,Row0Nodes>,
+    Graph<R1,Row1Nodes>,
+    Graph<R2,Row2Nodes>
+  )
 {
   using Row01MergeResult = decltype(merge(Row0Nodes{},Row1Nodes{}));
   using Row01Nodes = decltype(nodesOf(Row01MergeResult{}));
@@ -1190,22 +1201,13 @@ static auto mat33(
   using Row012MergeResult = decltype(merge(Row01Nodes{},Row2Nodes{}));
   using Row012Nodes = decltype(nodesOf(Row012MergeResult{}));
   using MapRow2 = decltype(mapBOf(Row012MergeResult{}));
-  constexpr size_t new_r0x = r0x;
-  constexpr size_t new_r0y = r0y;
-  constexpr size_t new_r0z = r0z;
-  constexpr size_t new_r1x = mapped_index<r1x,MapRow1>;
-  constexpr size_t new_r1y = mapped_index<r1y,MapRow1>;
-  constexpr size_t new_r1z = mapped_index<r1z,MapRow1>;
-  constexpr size_t new_r2x = mapped_index<r2x,MapRow2>;
-  constexpr size_t new_r2y = mapped_index<r2y,MapRow2>;
-  constexpr size_t new_r2z = mapped_index<r2z,MapRow2>;
+  using NewR0 = R0;
+  using NewR1 = decltype(mappedIndices(R1{},MapRow1{}));
+  using NewR2 = decltype(mappedIndices(R2{},MapRow2{}));
 
   return
-    Graph<Mat33Indices<
-      Vec3Indices<new_r0x,new_r0y,new_r0z>,
-      Vec3Indices<new_r1x,new_r1y,new_r1z>,
-      Vec3Indices<new_r2x,new_r2y,new_r2z>
-    >,
+    Graph<
+      Mat33Indices<NewR0,NewR1,NewR2>,
       Row012Nodes
     >{};
 }
@@ -2270,7 +2272,7 @@ static void testQRDecompFunction()
   // agnostic to the representation of the result.
   using MergeResult = decltype(merge(nodesOf(qr.q),nodesOf(qr.r)));
   using MergedNodes = decltype(nodesOf(MergeResult{}));
-  using RMap = decltype(mapOf(MergeResult{}));
+  using RMap = decltype(mapBOf(MergeResult{}));
   using MappedR = decltype(map(qr.r, RMap{}));
   Function< decltype(nodesIndicesOf(qr)), decltype(nodesOf(qr)) > f;
   Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec(7,8,9));
