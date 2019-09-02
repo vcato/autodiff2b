@@ -7,6 +7,7 @@
 
 #define ADD_QR_DECOMP 0
 #define ADD_TEST 0
+#define CHANGE_GET_DERIV 0
 
 
 using std::cerr;
@@ -171,18 +172,16 @@ struct IndexedValue {
 
 
 namespace {
-
-template <typename First,size_t node_index,size_t adjoint_node_index>
-struct AdjointList : First, MapEntry<node_index,adjoint_node_index> {
+template <typename First,typename Entry>
+struct MapList : First, Entry {
 };
-
 }
 
 
 template <typename First,size_t node_index,size_t adjoint_node_index>
 static constexpr size_t
   findAdjoint(
-    AdjointList<First,node_index,adjoint_node_index>,
+    MapList<First,MapEntry<node_index,adjoint_node_index>>,
     Indexed<node_index>
   )
 {
@@ -198,7 +197,7 @@ template <
 >
 static constexpr size_t
   findAdjoint(
-    AdjointList<First,node_index1,adjoint_node_index>,
+    MapList<First,MapEntry<node_index1,adjoint_node_index>>,
     Indexed<node_index2>
   )
 {
@@ -419,13 +418,6 @@ auto updateMergedNodes(List<Nodes...>,None,Expr)
   using NewNodes = List<Nodes...,Node<new_index,Expr>>;
   return UpdateMergedNodesResult<NewNodes,new_index>{};
 }
-}
-
-
-namespace {
-template <typename First,typename Entry>
-struct MapList : First, Entry {
-};
 }
 
 
@@ -830,6 +822,33 @@ template <size_t index,typename List>
 auto getValue(Indexed<index>,const List &list)
 {
   return getValue2<index>(list);
+}
+}
+
+
+namespace {
+template <size_t xi,size_t yi,size_t zi,size_t n_values>
+auto getValue3(Vec3Indices<xi,yi,zi>,const float (&values)[n_values])
+{
+  assert(xi < n_values);
+  assert(yi < n_values);
+  assert(zi < n_values);
+  float x = values[xi];
+  float y = values[yi];
+  float z = values[zi];
+  return vec3(x,y,z);
+}
+}
+
+
+namespace {
+template <typename Row0,typename Row1,typename Row2,size_t n_values>
+auto getValue3(Mat33Indices<Row0,Row1,Row2>,const float (&values)[n_values])
+{
+  Vec3f row0 = getValue3(Row0{},values);
+  Vec3f row1 = getValue3(Row1{},values);
+  Vec3f row2 = getValue3(Row2{},values);
+  return mat33(row0,row1,row2);
 }
 }
 
@@ -1475,7 +1494,7 @@ template <typename OldAdjointList,size_t adjoint_index,size_t value_index>
 static auto
   setAdjoint(OldAdjointList,Indexed<adjoint_index>,Indexed<value_index>)
 {
-  return AdjointList<OldAdjointList,adjoint_index,value_index>{};
+  return MapList<OldAdjointList,MapEntry<adjoint_index,value_index>>{};
 }
 
 
@@ -1732,7 +1751,7 @@ static auto
   using First =
     decltype(makeZeroAdjoints(Indexed<node_count-1>{},Indexed<zero_node>{}));
 
-  return AdjointList<First,node_count-1,zero_node>{};
+  return MapList<First,MapEntry<node_count-1,zero_node>>{};
 }
 
 
@@ -1853,26 +1872,26 @@ static auto adjointNodes(Indexed<result_index>,List<Nodes1...>)
 static void testFindAdjoint()
 {
   using Adjoints =
-    AdjointList<
-    AdjointList<
-    AdjointList<
-    AdjointList<
-    AdjointList<
-    AdjointList<
-    AdjointList<
-    AdjointList<
-    AdjointList<
-    AdjointList<Empty,
-    0, 5>,
-    1, 5>,
-    2, 5>,
-    3, 5>,
-    4, 5>,
-    4, 6>,
-    2, 8>,
-    3, 10>,
-    0, 12>, // dA = C*B
-    1, 14>;
+    MapList<
+    MapList<
+    MapList<
+    MapList<
+    MapList<
+    MapList<
+    MapList<
+    MapList<
+    MapList<
+    MapList<Empty,
+    MapEntry<0, 5>>,
+    MapEntry<1, 5>>,
+    MapEntry<2, 5>>,
+    MapEntry<3, 5>>,
+    MapEntry<4, 5>>,
+    MapEntry<4, 6>>,
+    MapEntry<2, 8>>,
+    MapEntry<3, 10>>,
+    MapEntry<0, 12>>, // dA = C*B
+    MapEntry<1, 14>>;
 
   constexpr size_t result = findAdjoint(Adjoints{},Indexed<0>{});
   static_assert(result == 12);
@@ -1893,11 +1912,11 @@ static void testMakeZeroAdjoints()
     );
 
   using Expected =
-    AdjointList<
-      AdjointList<
-        Empty, 0, zero_node
+    MapList<
+      MapList<
+        Empty, MapEntry<0, zero_node>
       >,
-      1, zero_node
+      MapEntry<1, zero_node>
     >;
 
   static_assert(is_same_v<Result,Expected>);
@@ -1921,12 +1940,12 @@ static void testAddDeriv()
     >;
 
   using Adjoints =
-    AdjointList<
-      AdjointList<
-        AdjointList<Empty,0,3>,  // adjoints[0] = 3
-        1,3                      // adjoints[1] = 3
+    MapList<
+      MapList<
+        MapList<Empty,MapEntry<0,3>>,  // adjoints[0] = 3
+        MapEntry<1,3>                      // adjoints[1] = 3
       >,
-      2,4                        // adjoints[2] = 4
+      MapEntry<2,4>                        // adjoints[2] = 4
     >;
 
   using Graph = AdjointGraph<Adjoints,Nodes>;
@@ -1953,18 +1972,18 @@ static void testAddDeriv()
     >;
 
   using ExpectedAdjoints =
-    AdjointList<
-      AdjointList<
-        AdjointList<
-          AdjointList<
-            AdjointList<Empty,0,3>,  // adjoints[0] = 3
-            1,3                      // adjoints[1] = 3
+    MapList<
+      MapList<
+        MapList<
+          MapList<
+            MapList<Empty,MapEntry<0,3>>,  // adjoints[0] = 3
+            MapEntry<1,3>                      // adjoints[1] = 3
           >,
-          2,4                        // adjoints[2] = 4
+          MapEntry<2,4>                        // adjoints[2] = 4
         >,
-        0,6                          // adjoints[0] = 6 // 0 + 1*B
+        MapEntry<0,6>                          // adjoints[0] = 6 // 0 + 1*B
       >,
-      1,8                            // adjoints[1] = 8 // 0 + 1*A
+      MapEntry<1,8>                            // adjoints[1] = 8 // 0 + 1*A
     >;
 
   using Expected = AdjointGraph<ExpectedAdjoints,ExpectedNodes>;
@@ -2305,6 +2324,15 @@ struct Function< Graph<Output,ValueNodes> >
     return findAdjoint(Adjoints{},Indexed<index>{});
   }
 
+#if CHANGE_GET_DERIV
+  template <typename G>
+  static auto derivIndices(G)
+  {
+    using MappedIndices = decltype(mappedIndices(G{}));
+    return mappedIndices(MappedIndices{},Adjoints{});
+  }
+#endif
+
   static constexpr size_t dresult_index = derivIndex(ValueGraph{});
   static constexpr size_t n_values = sizeOf(AdjointNodes{});
   float values[n_values];
@@ -2321,10 +2349,10 @@ struct Function< Graph<Output,ValueNodes> >
     ::evaluate<0,n_value_nodes>(AdjointNodes{},values);
   }
 
-  template <typename Graph>
-  auto get(Graph) const
+  template <typename OutputArg,typename NodesArg>
+  auto get(Graph<OutputArg,NodesArg>) const
   {
-    return getValue3(mappedIndices(Graph{}),values);
+    return getValue3(mappedIndices(Graph<OutputArg,NodesArg>{}),values);
   }
 
   template <typename Graph,typename T>
@@ -2342,7 +2370,11 @@ struct Function< Graph<Output,ValueNodes> >
   template <typename Graph>
   float getDeriv(Graph) const
   {
+#if !CHANGE_GET_DERIV
     return values[derivIndex(Graph{})];
+#else
+    return getValue3(derivIndices(Graph{}));
+#endif
   }
 };
 }
@@ -2480,6 +2512,15 @@ static auto indicesOf(QR<Q,R>)
 }
 
 
+template <typename Q,typename R,typename Values>
+static auto getValue3(QR<Q,R>,const Values &values)
+{
+  auto q = getValue3(Q{},values);
+  auto r = getValue3(R{},values);
+  return qr(q,r);
+}
+
+
 #if ADD_TEST
 static void testQRDecompFunction()
 {
@@ -2503,8 +2544,11 @@ static void testQRDecompFunction()
 
   f.set(a,a_val);
   f.evaluate();
-  auto qr_val = f.get(qr);
-  assert(qr_val == qrDecomposition(a_val));
+  Mat33f q_val = f.get(qr.q);
+  Mat33f r_val = f.get(qr.r);
+  QR<Mat33f,Mat33f> expected_qr = qrDecomposition(a_val);
+  assert(q_val == expected_qr.q);
+  assert(r_val == expected_qr.r);
   f.setDeriv(qr,dqr);
   f.evaluateDerivs();
   Mat33f da = f.getDeriv(a);
