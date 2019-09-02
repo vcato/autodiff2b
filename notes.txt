@@ -80,3 +80,16 @@ template <size_t... args>
 using DoubleMap = MakeDoubleMap<Compute<args>,MakeSequence<args>>::type;
 
 I don't know if this can be used to simplify the adjoint calculations.
+---
+It seems unnecessary that adjointNodes() needs us to specify the result
+index.  It seems more natural if we are just calculating the adjoint of
+every node, and then we use what we want.
+
+If we do that, it means every node could have an effect on the ultimate
+output, so we'd have to have a way to inject these derivatives.
+
+That makes some sense.  We might end up with functions where we return
+one calculated value, but also use that calculated value in other ways.
+It seems like we're being wasteful if we have a node for the "initial"
+derivative of every node.  We would be initializing a lot of things to zero
+at runtime which could have been optimized away.

@@ -34,6 +34,11 @@ template <size_t index> struct Indexed
 
 
 namespace {
+template <size_t...> struct Indices {};
+}
+
+
+namespace {
 
 
 template <size_t expr_index,typename Nodes> struct Graph
@@ -1587,39 +1592,16 @@ static auto
 }
 
 
-// Create the nodes that contain the adjoints by going through a forward
-// and reverse pass.  In the forward pass, we introduce an adjoint node
-// for each node.  In the reverse pass, we update the adjoint nodes.
-template <
-  typename... Nodes1,
-  typename... Nodes2,
-  size_t result_index
-    // I think this needs to be generalized to take a list of result
-    // indices.
->
+template <typename Adjoints,typename Nodes,size_t result_index>
 static auto
-  adjointNodes(
-    Indexed<result_index>,
-    List<Nodes1...>
-  )
+  addAdjoint(AdjointGraph<Adjoints,Nodes>,Indexed<result_index>)
 {
-  // Add a zero node to the nodes if we don't have one, since we'll need
-  // to initialize all the adjoints to this.
-  using InsertResult = decltype(insertNode(List<Nodes1...>{},Const<Zero>{}));
-  using NodesWithZero = decltype(newNodesOf(InsertResult{}));
-  constexpr size_t zero_index = newIndexOf(InsertResult{});
-
-  // Build the initial set of adjoints where all nodes are zero.
-  using Adjoints =
-    decltype(
-      makeZeroAdjoints(Indexed<sizeof...(Nodes1)>{},Indexed<zero_index>{})
-    );
-
-  constexpr size_t new_dresult_index = listSize<NodesWithZero>;
-  using NodesWithDResult = decltype(addNode(NodesWithZero{},External{}));
+  // Add a node that we'll use for storing the derivative of the result.
+  constexpr size_t new_dresult_index = listSize<Nodes>;
+  using NewNodes = decltype(addNode(Nodes{},External{}));
 
   // Set the adjoint of our result node
-  using Adjoints2 =
+  using NewAdjoints =
     decltype(
       setAdjoint(
         Adjoints{},
@@ -1628,12 +1610,79 @@ static auto
       )
     );
 
+  return AdjointGraph<NewAdjoints,NewNodes>{};
+}
+
+
+template <typename Adjoints,typename Nodes>
+static auto addAdjoints(AdjointGraph<Adjoints,Nodes>,Indices<>)
+{
+  return AdjointGraph<Adjoints,Nodes>{};
+}
+
+
+template <
+  typename Adjoints,
+  typename Nodes,
+  size_t first_result_index,
+  size_t... rest_result_indices
+>
+static auto
+  addAdjoints(
+    AdjointGraph<Adjoints,Nodes>,
+    Indices<first_result_index,rest_result_indices...>
+  )
+{
+  using AdjointGraph2 =
+    decltype(
+      addAdjoint(
+        AdjointGraph<Adjoints,Nodes>{},
+        Indexed<first_result_index>{}
+      )
+    );
+
+  return addAdjoints(AdjointGraph2{},Indices<rest_result_indices...>{});
+}
+
+
+// Create the nodes that contain the adjoints by going through a forward
+// and reverse pass.  In the forward pass, we introduce an adjoint node
+// for each node.  In the reverse pass, we update the adjoint nodes.
+template <
+  typename... Nodes,
+  typename ResultIndices
+>
+static auto adjointNodes(ResultIndices,List<Nodes...>)
+{
+  // Add a zero node to the nodes if we don't have one, since we'll need
+  // to initialize all the adjoints to this.
+  using InsertResult = decltype(insertNode(List<Nodes...>{},Const<Zero>{}));
+  using NodesWithZero = decltype(newNodesOf(InsertResult{}));
+  constexpr size_t zero_index = newIndexOf(InsertResult{});
+
+  // Build the initial set of adjoints where all nodes are zero.
+  using Adjoints =
+    decltype(
+      makeZeroAdjoints(Indexed<sizeof...(Nodes)>{},Indexed<zero_index>{})
+    );
+
+  using AdjointGraph2 =
+    decltype(
+      addAdjoints(
+        AdjointGraph<Adjoints,NodesWithZero>{},
+        ResultIndices{}
+      )
+    );
+
+  using Adjoints2 = decltype(adjointsOf(AdjointGraph2{}));
+  using NodesWithDResult = decltype(nodesOf(AdjointGraph2{}));
+
   // Process the nodes in reverse, adding new nodes and updating the adjoints.
   using RevResult =
     decltype(
       revNodes(
         AdjointGraph<Adjoints2,NodesWithDResult>{},
-        List<Nodes1...>{}
+        List<Nodes...>{}
       )
     );
 
@@ -1641,6 +1690,19 @@ static auto
   using NewAdjoints = decltype(adjointsOf(RevResult{}));
   return AdjointGraph<NewAdjoints,NewNodes>{};
 }
+
+
+template <
+  typename... Nodes1,
+  size_t result_index
+    // I think this needs to be generalized to take a list of result
+    // indices.
+>
+static auto adjointNodes(Indexed<result_index>,List<Nodes1...>)
+{
+  return adjointNodes(Indices<result_index>{},List<Nodes1...>{});
+}
+
 
 
 static void testFindAdjoint()
@@ -2042,7 +2104,7 @@ struct Function< Graph<value_index,ValueNodes> >
   using AdjointGraph =
     decltype(
       adjointNodes(
-        Indexed<value_index>{},
+        Indices<value_index>{},
         ValueNodes{}
       )
     );
@@ -2066,7 +2128,6 @@ struct Function< Graph<value_index,ValueNodes> >
   }
 
   static constexpr size_t dresult_index = derivIndex(ValueGraph{});
-
   static constexpr size_t n_values = sizeOf(AdjointNodes{});
   float values[n_values];
 
@@ -2184,7 +2245,7 @@ static void testQRDecompFunction()
   // create a function for those.  We need a way to set the inputs,
   // evaluate the function, get the outputs, set the derivatives of the
   // outputs, evaluate the derivatives, and get the derivatives of the inputs.
-  Function< decltype(nodesOf(qr)) > f;
+  Function< decltype(nodesIndicesOf(qr)) > f;
 
   Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec(7,8,9));
 
