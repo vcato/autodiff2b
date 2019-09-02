@@ -106,6 +106,10 @@ struct One {
 };
 
 
+struct Half {
+  static float value() { return 0.5; }
+};
+
 }
 
 
@@ -1566,6 +1570,24 @@ static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Add<i,j>>)
   return NewGraph2{};
 }
 
+
+template <typename Adjoints,typename Nodes,size_t k,size_t i>
+static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Sqrt<i>>)
+{
+  // adjoints[i] += adjoints[k]*0.5/sqrt(i)
+  using SqrtI = decltype(insertNode(Nodes{},Sqrt<i>{}));
+  using Nodes2 = decltype(newNodesOf(SqrtI{}));
+  constexpr size_t sqrt_i = newIndexOf(SqrtI{});
+  using CHalf = decltype(insertNode(Nodes2{},Const<Half>{}));
+  constexpr size_t half = newIndexOf(CHalf{});
+  using Nodes3 = decltype(newNodesOf(CHalf{}));
+  using Coef = decltype(insertNode(Nodes3{},Div<half,sqrt_i>{}));
+  using Nodes4 = decltype(newNodesOf(Coef{}));
+  constexpr size_t coef = newIndexOf(Coef{});
+  return addTo(AdjointGraph<Adjoints,Nodes4>{},Indexed<i>{},Indexed<coef>{});
+}
+
+
 template <typename Adjoints,typename Nodes,size_t k,size_t i,size_t j>
 static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Mul<i,j>>)
 {
@@ -2187,6 +2209,13 @@ void setValue(float (&values)[n],Node<index,Div<a,b>>)
   values[index] = values[a] / values[b];
 }
 
+
+template <size_t n,size_t index,size_t a>
+void setValue(float (&values)[n],Node<index,Sqrt<a>>)
+{
+  values[index] = sqrt(values[a]);
+}
+
 }
 
 
@@ -2350,6 +2379,23 @@ static void testDivFunction()
   assert(da == 1/6.0f);
   float expected_db = -5/float(6*6);
   assert(db == expected_db);
+}
+
+
+static void testSqrtFunction()
+{
+  auto a = var<struct A>();
+  auto b = sqrt(a);
+  float a_val = 25;
+  Function< decltype(b) > f;
+  f.set(a,a_val);
+  f.evaluate();
+  assert(f.get(b) == 5);
+  f.setDeriv(b,1);
+  f.evaluateDerivs();
+  float da = f.getDeriv(a);
+  float expected_da = 0.5/sqrt(a_val);
+  assert(da == expected_da);
 }
 
 
@@ -2532,6 +2578,7 @@ int main()
   testMulFunction();
   testDotFunction();
   testDivFunction();
+  testSqrtFunction();
 #if ADD_TEST
   testQRDecompFunction();
 #endif
