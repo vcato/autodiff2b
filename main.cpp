@@ -216,11 +216,16 @@ struct IndexedValueList : First, IndexedValue<index,T> {
 
 
 namespace {
-template <typename NodesArg,typename MapBArg>
-struct MergeResult {
-  using Nodes = NodesArg;
-  using MapB = MapBArg;
-};
+
+template <typename Nodes,typename MapB> struct MergeResult {};
+
+template <typename Nodes,typename MapB>
+Nodes nodesOf(MergeResult<Nodes,MapB>);
+
+
+template <typename Nodes,typename MapB>
+MapB mapBOf(MergeResult<Nodes,MapB>);
+
 }
 
 
@@ -533,8 +538,8 @@ auto
 {
   constexpr size_t new_index_a = index_a;
   using MergeResult = decltype(merge(NodesA{},NodesB{}));
-  using MergedNodes = typename MergeResult::Nodes;
-  using MapB        = typename MergeResult::MapB;
+  using MergedNodes = decltype(nodesOf(MergeResult{}));
+  using MapB        = decltype(mapBOf(MergeResult{}));
   constexpr size_t new_index_b = mapped_index<index_b,MapB>;
   return mergedGraph(MergedNodes{},Op<new_index_a,new_index_b>{});
 }
@@ -1037,12 +1042,12 @@ static auto vec3(
 {
   constexpr size_t new_x_index = x_index;
   using XYMergeResult = decltype(merge(XNodes{},YNodes{}));
-  using XYNodes = typename XYMergeResult::Nodes;
-  using MapY = typename XYMergeResult::MapB;
+  using XYNodes = decltype(nodesOf(XYMergeResult{}));
+  using MapY = decltype(mapBOf(XYMergeResult{}));
   constexpr size_t new_y_index = mapped_index<y_index,MapY>;
   using XYZMergeResult = decltype(merge(XYNodes{},ZNodes{}));
-  using XYZNodes = typename XYZMergeResult::Nodes;
-  using MapZ = typename XYZMergeResult::MapB;
+  using XYZNodes = decltype(nodesOf(XYZMergeResult{}));
+  using MapZ = decltype(mapBOf(XYZMergeResult{}));
   constexpr size_t new_z_index = mapped_index<z_index,MapZ>;
   return Graph<Vec3Indices<new_x_index,new_y_index,new_z_index>,XYZNodes>{};
 }
@@ -1180,11 +1185,11 @@ static auto mat33(
 )
 {
   using Row01MergeResult = decltype(merge(Row0Nodes{},Row1Nodes{}));
-  using Row01Nodes = typename Row01MergeResult::Nodes;
-  using MapRow1 = typename Row01MergeResult::MapB;
+  using Row01Nodes = decltype(nodesOf(Row01MergeResult{}));
+  using MapRow1 = decltype(mapBOf(Row01MergeResult{}));
   using Row012MergeResult = decltype(merge(Row01Nodes{},Row2Nodes{}));
-  using Row012Nodes = typename Row012MergeResult::Nodes;
-  using MapRow2 = typename Row012MergeResult::MapB;
+  using Row012Nodes = decltype(nodesOf(Row012MergeResult{}));
+  using MapRow2 = decltype(mapBOf(Row012MergeResult{}));
   constexpr size_t new_r0x = r0x;
   constexpr size_t new_r0y = r0y;
   constexpr size_t new_r0z = r0z;
@@ -1895,7 +1900,7 @@ static void
   constexpr size_t index = decltype(indexOf(Graph{}))::value;
   using Nodes = decltype(nodesOf(Graph{}));
   using MergeResult = decltype(merge(AdjointNodes{},Nodes{}));
-  using Map = typename MergeResult::MapB;
+  using Map = decltype(mapBOf(MergeResult{}));
   constexpr size_t mi = mapped_index<index,Map>;
   values[mi] = value;
 }
@@ -2132,7 +2137,7 @@ struct Function< Graph<ScalarIndices<value_index>,ValueNodes> >
   static constexpr size_t mappedIndex(Graph<ScalarIndices<index>,Nodes>)
   {
     using MergeResult = decltype(merge(AdjointNodes{},Nodes{}));
-    using Map = typename MergeResult::MapB;
+    using Map = decltype(mapBOf(MergeResult{}));
     return mapped_index<index,Map>;
   }
 
