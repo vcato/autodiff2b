@@ -7,6 +7,7 @@
 
 #define ADD_QR_DECOMP 0
 #define ADD_TEST 0
+#define CHANGE_GET 0
 
 
 using std::cerr;
@@ -1571,6 +1572,28 @@ static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Add<i,j>>)
 }
 
 
+template <typename Adjoints,typename Nodes,size_t k,size_t i,size_t j>
+static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Sub<i,j>>)
+{
+  // adjoints[i] += adjoints[k];
+  // adjoints[j] -= adjoints[k];
+  //
+  constexpr size_t adjoint_k = find_adjoint<Adjoints,k>;
+
+  using NewGraph1 =
+    decltype(
+      addTo(AdjointGraph<Adjoints,Nodes>{},Indexed<i>{},Indexed<adjoint_k>{})
+    );
+
+  // Add a new node which is the sum of node[adjoints[j]] and node[adjoints[k]]
+  // Replace adjoints[j] with the new node index.
+  using NewGraph2 =
+    decltype(subFrom(NewGraph1{},Indexed<j>{},Indexed<adjoint_k>{}));
+
+  return NewGraph2{};
+}
+
+
 template <typename Adjoints,typename Nodes,size_t k,size_t i>
 static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Sqrt<i>>)
 {
@@ -2276,7 +2299,13 @@ struct Function< Graph<Output,ValueNodes> >
   template <typename Graph>
   auto get(Graph) const
   {
+#if !CHANGE_GET
     return values[mappedIndex(Graph{})];
+#else
+    // I think we'll want this to be.
+    // return getValue(mappedIndices(Graph{}),values);
+    assert(false);
+#endif
   }
 
   template <typename Graph,typename T>
@@ -2451,7 +2480,7 @@ static void testQRDecompFunction()
   using RMap = decltype(mapBOf(MergeResult{}));
   using RIndices = decltype(mappedIndices(outputOf(qr.r), RMap{}));
   Function< Graph<QR<QIndices,RIndices>,QRNodes> > f;
-  Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec(7,8,9));
+  Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec3(7,8,9));
 
   f.set(a,a_val);
   f.evaluate();
