@@ -7,7 +7,6 @@
 
 #define ADD_QR_DECOMP 0
 #define ADD_TEST 0
-#define CHANGE_GET 0
 
 
 using std::cerr;
@@ -725,6 +724,14 @@ struct Vec3Indices {};
 }
 
 
+template <size_t index,typename Map>
+static auto mappedIndices(ScalarIndices<index>,Map)
+{
+  constexpr size_t new_index = mapped_index<index,Map>;
+  return ScalarIndices<new_index>{};
+}
+
+
 template <size_t x,size_t y,size_t z,typename Map>
 static auto mappedIndices(Vec3Indices<x,y,z>,Map)
 {
@@ -823,6 +830,16 @@ template <size_t index,typename List>
 auto getValue(Indexed<index>,const List &list)
 {
   return getValue2<index>(list);
+}
+}
+
+
+namespace {
+template <size_t index,size_t n_values>
+auto getValue3(ScalarIndices<index>,const float (&values)[n_values])
+{
+  assert(index < n_values);
+  return values[index];
 }
 }
 
@@ -2273,6 +2290,14 @@ struct Function< Graph<Output,ValueNodes> >
     return mapped_index<index,Map>;
   }
 
+  template <typename OutputArg,typename Nodes>
+  static auto mappedIndices(Graph<OutputArg,Nodes>)
+  {
+    using MergeResult = decltype(merge(AdjointNodes{},Nodes{}));
+    using Map = decltype(mapBOf(MergeResult{}));
+    return ::mappedIndices(OutputArg{},Map{});
+  }
+
   template <typename G>
   static constexpr size_t derivIndex(G)
   {
@@ -2299,13 +2324,7 @@ struct Function< Graph<Output,ValueNodes> >
   template <typename Graph>
   auto get(Graph) const
   {
-#if !CHANGE_GET
-    return values[mappedIndex(Graph{})];
-#else
-    // I think we'll want this to be.
-    // return getValue(mappedIndices(Graph{}),values);
-    assert(false);
-#endif
+    return getValue3(mappedIndices(Graph{}),values);
   }
 
   template <typename Graph,typename T>
