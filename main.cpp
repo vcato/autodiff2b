@@ -2237,25 +2237,30 @@ static void testDotFunction()
 #if ADD_TEST
 static void testQRDecompFunction()
 {
+  std::mt19937 engine(/*seed*/1);
   auto a = mat33Var<struct A>();
   auto qr = qrDecomposition(a);
-  auto dqr = dqVar<struct DQR>();
+  Mat33f dr = randomMat33(engine);
+  Mat33f dq = randomMat33(engine);
+  auto dqr = ::qr(dq,dr);
 
-  // Here, it seems like we want to get the node indices from qr and
-  // create a function for those.  We need a way to set the inputs,
-  // evaluate the function, get the outputs, set the derivatives of the
-  // outputs, evaluate the derivatives, and get the derivatives of the inputs.
-  Function< decltype(nodesIndicesOf(qr)) > f;
-
+  // qr is a QR<Q,R>, where Q and R are graphs with their own nodes.
+  // It needs to be that way so that the qrDecomposition() function is
+  // agnostic to the representation of the result.
+  using MergeResult = decltype(merge(nodesOf(qr.q),nodesOf(qr.r)));
+  using MergedNodes = decltype(nodesOf(MergeResult{}));
+  using RMap = decltype(mapOf(MergeResult{}));
+  using MappedR = decltype(map(qr.r, RMap{}));
+  Function< decltype(nodesIndicesOf(qr)), decltype(nodesOf(qr)) > f;
   Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec(7,8,9));
 
-  f.setInputs(a,a_val);
+  f.set(a,a_val);
   f.evaluate();
-  auto qr_val = f.getOutputs(qr);
+  auto qr_val = f.get(qr);
   assert(qr_val == qrDecomposition(a_val));
-  f.setOutputDerivs();
+  f.setDeriv(qr,dqr);
   f.evaluateDerivs();
-  Mat33f da = f.getInputDerivs(a);
+  Mat33f da = f.getDeriv(a);
 
   // Verify that the derivatives are correct.
   assert(false);
