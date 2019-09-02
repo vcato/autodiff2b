@@ -41,23 +41,30 @@ template <size_t...> struct Indices {};
 namespace {
 
 
-template <size_t expr_index,typename Nodes> struct Graph
+template <typename Output,typename Nodes> struct Graph
 {
   operator float() const;
 };
 
+}
 
+
+namespace {
+template <size_t> struct ScalarIndices;
+}
+
+
+namespace {
 
 template <size_t expr_index,typename Nodes>
-constexpr auto indexOf(Graph<expr_index,Nodes>)
+constexpr auto indexOf(Graph<ScalarIndices<expr_index>,Nodes>)
 {
   return Indexed<expr_index>{};
 }
 
 
-template <size_t expr_index,typename Nodes>
-Nodes nodesOf(Graph<expr_index,Nodes>);
-
+template <typename Output,typename Nodes>
+Nodes nodesOf(Graph<Output,Nodes>);
 
 }
 
@@ -253,7 +260,7 @@ auto var()
 {
   using Expr = Var<Tag>;
   using Node0 = Node<0,Expr>;
-  return Graph<0,List<Node0>>{};
+  return Graph<ScalarIndices<0>,List<Node0>>{};
 }
 }
 
@@ -264,7 +271,7 @@ auto constant()
 {
   using Expr = Const<Tag>;
   using Node0 = Node<0,Expr>;
-  return Graph<0,List<Node0>>{};
+  return Graph<ScalarIndices<0>,List<Node0>>{};
 }
 }
 
@@ -272,7 +279,7 @@ auto constant()
 template <typename Value>
 static float
   floatValue(
-    Graph<0,
+    Graph<ScalarIndices<0>,
       List<
         Node<0,Const<Value>>
       >
@@ -283,8 +290,8 @@ static float
 }
 
 
-template <size_t expr_index,typename Nodes>
-Graph<expr_index,Nodes>::operator float() const
+template <typename Output,typename Nodes>
+Graph<Output,Nodes>::operator float() const
 {
   return floatValue(*this);
 }
@@ -507,7 +514,7 @@ template <typename MergedNodes,typename NewExpr>
 auto mergedGraph(MergedNodes,NewExpr)
 {
   auto new_nodes = addNode(MergedNodes{},NewExpr{});
-  return Graph<listSize<MergedNodes>,decltype(new_nodes)>{};
+  return Graph<ScalarIndices<listSize<MergedNodes>>,decltype(new_nodes)>{};
 }
 }
 
@@ -518,7 +525,11 @@ template <
   size_t index_a,typename NodesA,
   size_t index_b,typename NodesB
 >
-auto binary(Graph<index_a,NodesA>,Graph<index_b,NodesB>)
+auto
+  binary(
+    Graph<ScalarIndices<index_a>,NodesA>,
+    Graph<ScalarIndices<index_b>,NodesB>
+  )
 {
   constexpr size_t new_index_a = index_a;
   using MergeResult = decltype(merge(NodesA{},NodesB{}));
@@ -535,7 +546,11 @@ template <
   size_t index_a,typename NodesA,
   size_t index_b,typename NodesB
 >
-auto operator+(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
+auto
+  operator+(
+    Graph<ScalarIndices<index_a>,NodesA> graph_a,
+    Graph<ScalarIndices<index_b>,NodesB> graph_b
+  )
 {
   return binary<Add>(graph_a,graph_b);
 }
@@ -547,7 +562,11 @@ template <
   size_t index_a,typename NodesA,
   size_t index_b,typename NodesB
 >
-auto operator-(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
+auto
+  operator-(
+    Graph<ScalarIndices<index_a>,NodesA> graph_a,
+    Graph<ScalarIndices<index_b>,NodesB> graph_b
+  )
 {
   return binary<Sub>(graph_a,graph_b);
 }
@@ -559,7 +578,11 @@ template <
   size_t index_a,typename NodesA,
   size_t index_b,typename NodesB
 >
-auto operator*(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
+auto
+  operator*(
+    Graph<ScalarIndices<index_a>,NodesA> graph_a,
+    Graph<ScalarIndices<index_b>,NodesB> graph_b
+  )
 {
   return binary<Mul>(graph_a,graph_b);
 }
@@ -571,7 +594,11 @@ template <
   size_t index_a,typename NodesA,
   size_t index_b,typename NodesB
 >
-auto operator/(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
+auto
+  operator/(
+    Graph<ScalarIndices<index_a>,NodesA> graph_a,
+    Graph<ScalarIndices<index_b>,NodesB> graph_b
+  )
 {
   return binary<Div>(graph_a,graph_b);
 }
@@ -580,7 +607,7 @@ auto operator/(Graph<index_a,NodesA> graph_a,Graph<index_b,NodesB> graph_b)
 
 namespace {
 template <typename Tag,typename T>
-auto let(Graph<0,List<Node<0,Var<Tag>>>>,const T& value)
+auto let(Graph<ScalarIndices<0>,List<Node<0,Var<Tag>>>>,const T& value)
 {
   return Let<Tag,T>{value};
 }
@@ -589,7 +616,7 @@ auto let(Graph<0,List<Node<0,Var<Tag>>>>,const T& value)
 
 namespace {
 template <typename Tag,typename T>
-auto dual(Graph<0,List<Node<0,Var<Tag>>>>,T& value)
+auto dual(Graph<ScalarIndices<0>,List<Node<0,Var<Tag>>>>,T& value)
 {
   return Dual<Tag,T>{value};
 }
@@ -681,39 +708,35 @@ Mat33f mat33(Vec3f r1,Vec3f r2,Vec3f r3)
 
 
 namespace {
-
-
-template <typename Row0,typename Row1,typename Row2,typename Nodes>
-struct Mat33
-{
-  static Mat33f eval(const Vec3f &row0,const Vec3f &row1,const Vec3f &row2)
-  {
-    return mat33(row0,row1,row2);
-  }
-};
-
-
-template <size_t x,size_t y,size_t z> struct Mat33Row;
-
-
+template <typename Row0,typename Row1,typename Row2>
+struct Mat33Indices;
 }
 
 
 namespace {
-template <size_t x_index,size_t y_index,size_t z_index,typename Nodes>
-struct Vec3
-{
-  static Vec3f eval(float x,float y,float z) { return Vec3f{x,y,z}; }
-};
+template <size_t x_index,size_t y_index,size_t z_index>
+struct Vec3Indices {};
 }
 
 
-template <
-  size_t m00,size_t m01,size_t m02,typename Row1,typename Row2,typename Nodes
->
-static auto row(const Mat33<Mat33Row<m00,m01,m02>,Row1,Row2,Nodes>,Indexed<0>)
+template <typename Row0,typename Row1,typename Row2,typename Nodes>
+static auto row(const Graph<Mat33Indices<Row0,Row1,Row2>,Nodes>,Indexed<0>)
 {
-  return Vec3<m00,m01,m02,Nodes>{};
+  return Graph<Row0,Nodes>{};
+}
+
+
+template <typename Row0,typename Row1,typename Row2,typename Nodes>
+static auto row(const Graph<Mat33Indices<Row0,Row1,Row2>,Nodes>,Indexed<1>)
+{
+  return Graph<Row1,Nodes>{};
+}
+
+
+template <typename Row0,typename Row1,typename Row2,typename Nodes>
+static auto row(const Graph<Mat33Indices<Row0,Row1,Row2>,Nodes>,Indexed<2>)
+{
+  return Graph<Row2,Nodes>{};
 }
 
 
@@ -809,7 +832,11 @@ template <
   typename NodesA,
   typename NodesB
 >
-auto operator-(Vec3<xa,ya,za,NodesA> a,Vec3<xb,yb,zb,NodesB> b)
+auto
+  operator-(
+    Graph<Vec3Indices<xa,ya,za>,NodesA> a,
+    Graph<Vec3Indices<xb,yb,zb>,NodesB> b
+  )
 {
   auto new_x = xValue(a)-xValue(b);
   auto new_y = yValue(a)-yValue(b);
@@ -827,7 +854,11 @@ template <
   typename NodesA,
   typename NodesB
 >
-auto operator*(Vec3<x,y,z,NodesA> a,Graph<index_b,NodesB> b)
+auto
+  operator*(
+    Graph<Vec3Indices<x,y,z>,NodesA> a,
+    Graph<ScalarIndices<index_b>,NodesB> b
+  )
 {
   auto new_x = xValue(a)*b;
   auto new_y = yValue(a)*b;
@@ -845,7 +876,7 @@ template <
   typename NodesA,
   typename NodesB
 >
-auto operator/(Vec3<x,y,z,NodesA> a,Graph<index_b,NodesB> b)
+auto operator/(Graph<Vec3Indices<x,y,z>,NodesA> a,Graph<ScalarIndices<index_b>,NodesB> b)
 {
   auto new_x = xValue(a)/b;
   auto new_y = yValue(a)/b;
@@ -952,7 +983,7 @@ namespace {
 template <typename Nodes,size_t index,typename ...Lets>
 auto
   eval(
-    Graph<index, Nodes>,
+    Graph<ScalarIndices<index>, Nodes>,
     Lets... lets
   )
 {
@@ -972,7 +1003,7 @@ template <
 >
 auto
   eval(
-    Vec3<x_index,y_index,z_index,Nodes>,
+    Graph<Vec3Indices<x_index,y_index,z_index>,Nodes>,
     Lets... lets
   )
 {
@@ -987,7 +1018,7 @@ auto
 
 namespace {
 template <typename Nodes,size_t index,typename Values>
-auto get(Graph<index,Nodes>,const Values &values)
+auto get(Graph<ScalarIndices<index>,Nodes>,const Values &values)
 {
   return getValue(Indexed<index>{},values);
 }
@@ -999,9 +1030,9 @@ template <
   typename XNodes,typename YNodes,typename ZNodes
 >
 static auto vec3(
-  Graph<x_index,XNodes>,
-  Graph<y_index,YNodes>,
-  Graph<z_index,ZNodes>
+  Graph<ScalarIndices<x_index>,XNodes>,
+  Graph<ScalarIndices<y_index>,YNodes>,
+  Graph<ScalarIndices<z_index>,ZNodes>
 )
 {
   constexpr size_t new_x_index = x_index;
@@ -1013,7 +1044,7 @@ static auto vec3(
   using XYZNodes = typename XYZMergeResult::Nodes;
   using MapZ = typename XYZMergeResult::MapB;
   constexpr size_t new_z_index = mapped_index<z_index,MapZ>;
-  return Vec3<new_x_index,new_y_index,new_z_index,XYZNodes>{};
+  return Graph<Vec3Indices<new_x_index,new_y_index,new_z_index>,XYZNodes>{};
 }
 
 
@@ -1026,10 +1057,11 @@ namespace {
 template <typename Tag>
 auto
   let(
-    Mat33<
-      Mat33Row<0,1,2>,
-      Mat33Row<3,4,5>,
-      Mat33Row<6,7,8>,
+    Graph<Mat33Indices<
+      Vec3Indices<0,1,2>,
+      Vec3Indices<3,4,5>,
+      Vec3Indices<6,7,8>
+    >,
       List<
         Node<0,Var<VarElem<Tag,0,0>>>,
         Node<1,Var<VarElem<Tag,0,1>>>,
@@ -1041,7 +1073,8 @@ auto
         Node<7,Var<VarElem<Tag,2,1>>>,
         Node<8,Var<VarElem<Tag,2,2>>>
       >
-    >,
+    >
+    ,
     const Mat33f &value
   )
 {
@@ -1054,10 +1087,11 @@ namespace {
 template <typename Tag>
 auto mat33Var()
 {
-  return Mat33<
-    Mat33Row<0,1,2>,
-    Mat33Row<3,4,5>,
-    Mat33Row<6,7,8>,
+  return Graph<Mat33Indices<
+    Vec3Indices<0,1,2>,
+    Vec3Indices<3,4,5>,
+    Vec3Indices<6,7,8>
+  >,
     List<
       Node<0,Var<VarElem<Tag,0,0>>>,
       Node<1,Var<VarElem<Tag,0,1>>>,
@@ -1084,10 +1118,11 @@ template <
 >
 auto
   eval(
-    Mat33<
-      Mat33Row<r0xi,r0yi,r0zi>,
-      Mat33Row<r1xi,r1yi,r1zi>,
-      Mat33Row<r2xi,r2yi,r2zi>,
+    Graph<Mat33Indices<
+      Vec3Indices<r0xi,r0yi,r0zi>,
+      Vec3Indices<r1xi,r1yi,r1zi>,
+      Vec3Indices<r2xi,r2yi,r2zi>
+    >,
       Nodes
     >,
     Lets... lets
@@ -1139,9 +1174,9 @@ template <
   typename Row0Nodes,typename Row1Nodes,typename Row2Nodes
 >
 static auto mat33(
-  Vec3<r0x,r0y,r0z,Row0Nodes>,
-  Vec3<r1x,r1y,r1z,Row1Nodes>,
-  Vec3<r2x,r2y,r2z,Row2Nodes>
+  Graph<Vec3Indices<r0x,r0y,r0z>,Row0Nodes>,
+  Graph<Vec3Indices<r1x,r1y,r1z>,Row1Nodes>,
+  Graph<Vec3Indices<r2x,r2y,r2z>,Row2Nodes>
 )
 {
   using Row01MergeResult = decltype(merge(Row0Nodes{},Row1Nodes{}));
@@ -1161,10 +1196,11 @@ static auto mat33(
   constexpr size_t new_r2z = mapped_index<r2z,MapRow2>;
 
   return
-    Mat33<
-      Mat33Row<new_r0x,new_r0y,new_r0z>,
-      Mat33Row<new_r1x,new_r1y,new_r1z>,
-      Mat33Row<new_r2x,new_r2y,new_r2z>,
+    Graph<Mat33Indices<
+      Vec3Indices<new_r0x,new_r0y,new_r0z>,
+      Vec3Indices<new_r1x,new_r1y,new_r1z>,
+      Vec3Indices<new_r2x,new_r2y,new_r2z>
+    >,
       Row012Nodes
     >{};
 }
@@ -1186,23 +1222,23 @@ static auto columns(
 
 
 template <size_t x,size_t y,size_t z,typename Nodes>
-static auto xValue(Vec3<x,y,z,Nodes>)
+static auto xValue(Graph<Vec3Indices<x,y,z>,Nodes>)
 {
-  return Graph<x,Nodes>{};
+  return Graph<ScalarIndices<x>,Nodes>{};
 }
 
 
 template <size_t x,size_t y,size_t z,typename Nodes>
-static auto yValue(Vec3<x,y,z,Nodes>)
+static auto yValue(Graph<Vec3Indices<x,y,z>,Nodes>)
 {
-  return Graph<y,Nodes>{};
+  return Graph<ScalarIndices<y>,Nodes>{};
 }
 
 
 template <size_t x,size_t y,size_t z,typename Nodes>
-static auto zValue(Vec3<x,y,z,Nodes>)
+static auto zValue(Graph<Vec3Indices<x,y,z>,Nodes>)
 {
-  return Graph<z,Nodes>{};
+  return Graph<ScalarIndices<z>,Nodes>{};
 }
 
 
@@ -1237,50 +1273,30 @@ static void testFindNodeIndex()
 
 
 template <size_t row,size_t col,size_t mat_index,typename Nodes>
-static auto elem(Graph<mat_index,Nodes>)
+static auto elem(Graph<ScalarIndices<mat_index>,Nodes>)
 {
   return mergedGraph(Nodes{},Elem<mat_index,row,col>{});
 }
 
 
-template <
-  size_t m10,size_t m11,size_t m12,typename Row0,typename Row2,typename Nodes
->
-static auto
-  row(const Mat33<Row0,Mat33Row<m10,m11,m12>,Row2,Nodes>,Indexed<1>)
+template <size_t x,size_t y,size_t z,typename Nodes>
+static auto elem(Graph<Vec3Indices<x,y,z>,Nodes>,Indexed<0>)
 {
-  return Vec3<m10,m11,m12,Nodes>{};
-}
-
-
-template <
-  size_t m20,size_t m21,size_t m22,typename Row0,typename Row1,typename Nodes
->
-static auto
-  row(const Mat33<Row0,Row1,Mat33Row<m20,m21,m22>,Nodes>,Indexed<2>)
-{
-  return Vec3<m20,m21,m22,Nodes>{};
+  return Graph<ScalarIndices<x>,Nodes>{};
 }
 
 
 template <size_t x,size_t y,size_t z,typename Nodes>
-static auto elem(Vec3<x,y,z,Nodes>,Indexed<0>)
+static auto elem(Graph<Vec3Indices<x,y,z>,Nodes>,Indexed<1>)
 {
-  return Graph<x,Nodes>{};
+  return Graph<ScalarIndices<y>,Nodes>{};
 }
 
 
 template <size_t x,size_t y,size_t z,typename Nodes>
-static auto elem(Vec3<x,y,z,Nodes>,Indexed<1>)
+static auto elem(Graph<Vec3Indices<x,y,z>,Nodes>,Indexed<2>)
 {
-  return Graph<y,Nodes>{};
-}
-
-
-template <size_t x,size_t y,size_t z,typename Nodes>
-static auto elem(Vec3<x,y,z,Nodes>,Indexed<2>)
-{
-  return Graph<z,Nodes>{};
+  return Graph<ScalarIndices<z>,Nodes>{};
 }
 
 
@@ -1302,7 +1318,7 @@ static auto col(const M &m)
 
 
 template <size_t index,typename Nodes>
-static auto sqrt(Graph<index,Nodes>)
+static auto sqrt(Graph<ScalarIndices<index>,Nodes>)
 {
   return mergedGraph(Nodes{},Sqrt<index>{});
 }
@@ -1828,7 +1844,7 @@ static void testAddDeriv()
 
 
 template <size_t index,typename... Nodes>
-static auto nodesOf(Graph<index,List<Nodes...>>)
+static auto nodesOf(Graph<ScalarIndices<index>,List<Nodes...>>)
 {
   return List<Nodes...>{};
 }
@@ -1840,7 +1856,7 @@ template <typename AdjointGraph,typename Tag>
 static auto
   varAdjoint(
     Graph<
-      0,
+      ScalarIndices<0>,
       List<
         Node<0,Var<Tag>>
       >
@@ -2097,9 +2113,9 @@ namespace {
 template <typename Graph> struct Function;
 
 template <size_t value_index,typename ValueNodes>
-struct Function< Graph<value_index,ValueNodes> >
+struct Function< Graph<ScalarIndices<value_index>,ValueNodes> >
 {
-  using ValueGraph = Graph<value_index,ValueNodes>;
+  using ValueGraph = Graph<ScalarIndices<value_index>,ValueNodes>;
 
   using AdjointGraph =
     decltype(
@@ -2113,7 +2129,7 @@ struct Function< Graph<value_index,ValueNodes> >
   using Adjoints = decltype(adjointsOf(AdjointGraph{}));
 
   template <size_t index,typename Nodes>
-  static constexpr size_t mappedIndex(Graph<index,Nodes>)
+  static constexpr size_t mappedIndex(Graph<ScalarIndices<index>,Nodes>)
   {
     using MergeResult = decltype(merge(AdjointNodes{},Nodes{}));
     using Map = typename MergeResult::MapB;
