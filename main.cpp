@@ -40,17 +40,23 @@ template <size_t...> struct Indices {};
 
 namespace {
 
-
 template <typename Output,typename Nodes> struct Graph
 {
   operator float() const;
 };
 
+
+template <typename Output,typename Nodes>
+Nodes nodesOf(Graph<Output,Nodes>);
+
+template <typename Output,typename Nodes>
+Output outputOf(Graph<Output,Nodes>);
+
 }
 
 
 namespace {
-template <size_t> struct ScalarIndices;
+template <size_t> struct ScalarIndices {};
 }
 
 
@@ -61,10 +67,6 @@ constexpr auto indexOf(Graph<ScalarIndices<expr_index>,Nodes>)
 {
   return Indexed<expr_index>{};
 }
-
-
-template <typename Output,typename Nodes>
-Nodes nodesOf(Graph<Output,Nodes>);
 
 }
 
@@ -713,12 +715,6 @@ Mat33f mat33(Vec3f r1,Vec3f r2,Vec3f r3)
 
 
 namespace {
-template <typename Row0,typename Row1,typename Row2>
-struct Mat33Indices;
-}
-
-
-namespace {
 template <size_t x_index,size_t y_index,size_t z_index>
 struct Vec3Indices {};
 }
@@ -731,6 +727,22 @@ static auto mappedIndices(Vec3Indices<x,y,z>,Map)
   constexpr size_t new_y = mapped_index<y,Map>;
   constexpr size_t new_z = mapped_index<z,Map>;
   return Vec3Indices<new_x,new_y,new_z>{};
+}
+
+
+namespace {
+template <typename Row0,typename Row1,typename Row2>
+struct Mat33Indices;
+}
+
+
+template <typename Row0,typename Row1,typename Row2,typename Map>
+static auto mappedIndices(Mat33Indices<Row0,Row1,Row2>,Map)
+{
+  using NewRow0 = decltype(mappedIndices(Row0{},Map{}));
+  using NewRow1 = decltype(mappedIndices(Row1{},Map{}));
+  using NewRow2 = decltype(mappedIndices(Row2{},Map{}));
+  return Mat33Indices<NewRow0,NewRow1,NewRow2>{};
 }
 
 
@@ -1464,40 +1476,70 @@ static auto addTo(AdjointGraph<Adjoints,List<Nodes...>>,Indexed<i>,Indexed<k>)
 }
 
 
-template <typename Adjoints,typename Nodes,size_t adjoint_k,size_t i,size_t j>
-static auto
-  addMul(AdjointGraph<Adjoints,Nodes>,Indexed<i>,Indexed<adjoint_k>,Indexed<j>)
+// adjoints[i] -= k
+template <typename Adjoints,typename... Nodes,size_t i,size_t k>
+static auto subFrom(AdjointGraph<Adjoints,List<Nodes...>>,Indexed<i>,Indexed<k>)
 {
-  // adjoints[i] += adjoints[k]*j;
-  //
+  constexpr size_t adjoint_i = find_adjoint<Adjoints,i>;
 
-  // Insert adjoints[k]*j into the nodes
-  using InsertResult1 =
-    decltype(insertNode(Nodes{},Mul<adjoint_k,j>{}));
-    // This is a UpdateMergedNodesResult
+  using InsertResult =
+    decltype(insertNode(List<Nodes...>{},Sub<adjoint_i,k>{}));
 
+  using NewNodes = decltype(newNodesOf(InsertResult{}));
+  constexpr size_t new_index = newIndexOf(InsertResult{});
+
+  using NewAdjoints =
+    decltype(setAdjoint(Adjoints{},Indexed<i>{},Indexed<new_index>{}));
+
+  return AdjointGraph<NewAdjoints,NewNodes>{};
+}
+
+
+// adjoints[i] += expr;
+template <typename Adjoints,typename Nodes,size_t i,typename Expr>
+static auto addExpr(AdjointGraph<Adjoints,Nodes>,Indexed<i>,Expr)
+{
+  using InsertResult1 = decltype(insertNode(Nodes{},Expr{}));
   using NewNodes1 = decltype(newNodesOf(InsertResult1{}));
-  constexpr size_t ak_times_aj = newIndexOf(InsertResult1{});
+  constexpr size_t expr = newIndexOf(InsertResult1{});
 
   // add adjoints[k]*j to adjoints[i]
-  using NewGraph1 =
-    decltype(
-      addTo(
-        AdjointGraph<Adjoints,NewNodes1>{},
-        Indexed<i>{},
-        Indexed<ak_times_aj>{}
-      )
+  return
+    addTo(
+      AdjointGraph<Adjoints,NewNodes1>{},
+      Indexed<i>{},
+      Indexed<expr>{}
     );
+}
 
-  using Adjoints1 = decltype(adjointsOf(NewGraph1{}));
-  using NewNodes2 = decltype(nodesOf(NewGraph1{}));
 
-  return AdjointGraph<Adjoints1,NewNodes2>{};
+// adjoints[i] -= expr;
+template <typename Adjoints,typename Nodes,size_t i,typename Expr>
+static auto subExpr(AdjointGraph<Adjoints,Nodes>,Indexed<i>,Expr)
+{
+  using InsertResult1 = decltype(insertNode(Nodes{},Expr{}));
+  using NewNodes1 = decltype(newNodesOf(InsertResult1{}));
+  constexpr size_t expr = newIndexOf(InsertResult1{});
+
+  // add adjoints[k]*j to adjoints[i]
+  return
+    subFrom(
+      AdjointGraph<Adjoints,NewNodes1>{},
+      Indexed<i>{},
+      Indexed<expr>{}
+    );
 }
 
 
 template <typename AdjointGraph,size_t k,typename Tag>
 static auto addDeriv(AdjointGraph,Node<k,Var<Tag>>)
+{
+  return AdjointGraph{};
+}
+
+
+template <typename AdjointGraph,size_t k,typename Tag>
+static auto addDeriv(AdjointGraph,Node<k,Const<Tag>>)
 {
   return AdjointGraph{};
 }
@@ -1524,35 +1566,52 @@ static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Add<i,j>>)
   return NewGraph2{};
 }
 
-
 template <typename Adjoints,typename Nodes,size_t k,size_t i,size_t j>
 static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Mul<i,j>>)
 {
   constexpr size_t adjoint_k = find_adjoint<Adjoints,k>;
+  using NewGraph0 = AdjointGraph<Adjoints,Nodes>;
 
   // adjoints[i] += adjoints[k]*j
   using NewGraph1 =
-    decltype(
-      addMul(
-        AdjointGraph<Adjoints,Nodes>{},
-        Indexed<i>{},
-        Indexed<adjoint_k>{},
-        Indexed<j>{}
-      )
-    );
+    decltype(addExpr(NewGraph0{}, Indexed<i>{}, Mul<adjoint_k,j>{}));
 
   // adjoints[j] += adjoints[k]*i;
   using NewGraph2 =
+    decltype(addExpr(NewGraph1{}, Indexed<j>{}, Mul<adjoint_k,i>{}));
+
+  return NewGraph2{};
+}
+
+
+template <typename Adjoints,typename Nodes,size_t k,size_t i,size_t j>
+static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Div<i,j>>)
+{
+// d(a/b) = (b*d(a) - a*d(b))/(b**2)
+//        = d(a)/b - a*d(b)/(b**2)
+// d(a) += dresult/b
+// d(b) += dresult*-a/(b**2)
+
+  constexpr size_t adjoint_k = find_adjoint<Adjoints,k>;
+
+  // adjoints[i] += adjoints[k]/j
+  using NewGraph1 =
     decltype(
-      addMul(
-        NewGraph1{},
-        Indexed<j>{},
-        Indexed<adjoint_k>{},
-        Indexed<i>{}
+      addExpr(
+        AdjointGraph<Adjoints,Nodes>{},
+        Indexed<i>{},
+        Div<adjoint_k,j>{}
       )
     );
 
-  return NewGraph2{};
+  using Adjoints2 = decltype(adjointsOf(NewGraph1{}));
+  // adjoints[j] += adjoints[k]*i/(j**2);
+
+  using J2 = decltype(insertNode(nodesOf(NewGraph1{}),Mul<j,j>{}));
+  constexpr size_t j2 = newIndexOf(J2{});
+  using Nodes2 = decltype(newNodesOf(J2{}));
+
+  return subExpr(AdjointGraph<Adjoints2,Nodes2>{},Indexed<j>{},Div<i,j2>{});
 }
 
 
@@ -1619,7 +1678,8 @@ template <typename Adjoints,typename Nodes,size_t result_index>
 static auto
   addAdjoint(AdjointGraph<Adjoints,Nodes>,Indexed<result_index>)
 {
-  // Add a node that we'll use for storing the derivative of the result.
+  // Add a node that we'll use to represent the derivative of the result.
+  // This will be an input in the adjoint graph.
   constexpr size_t new_dresult_index = listSize<Nodes>;
   using NewNodes = decltype(addNode(Nodes{},External{}));
 
@@ -2101,6 +2161,20 @@ void setValue(float (&)[n],Node<index,External>)
 
 
 template <size_t n,size_t index,size_t a,size_t b>
+void setValue(float (&values)[n],Node<index,Add<a,b>>)
+{
+  values[index] = values[a] + values[b];
+}
+
+
+template <size_t n,size_t index,size_t a,size_t b>
+void setValue(float (&values)[n],Node<index,Sub<a,b>>)
+{
+  values[index] = values[a] - values[b];
+}
+
+
+template <size_t n,size_t index,size_t a,size_t b>
 void setValue(float (&values)[n],Node<index,Mul<a,b>>)
 {
   values[index] = values[a] * values[b];
@@ -2108,29 +2182,33 @@ void setValue(float (&values)[n],Node<index,Mul<a,b>>)
 
 
 template <size_t n,size_t index,size_t a,size_t b>
-void setValue(float (&values)[n],Node<index,Add<a,b>>)
+void setValue(float (&values)[n],Node<index,Div<a,b>>)
 {
-  values[index] = values[a] + values[b];
+  values[index] = values[a] / values[b];
 }
 
 }
 
 
 namespace {
+template <size_t index>
+auto indicesOf(ScalarIndices<index>)
+{
+  return Indices<index>{};
+}
+}
+
+
+namespace {
 template <typename Graph> struct Function;
 
-template <size_t value_index,typename ValueNodes>
-struct Function< Graph<ScalarIndices<value_index>,ValueNodes> >
+template <typename Output,typename ValueNodes>
+struct Function< Graph<Output,ValueNodes> >
 {
-  using ValueGraph = Graph<ScalarIndices<value_index>,ValueNodes>;
+  using ValueGraph = Graph<Output,ValueNodes>;
 
   using AdjointGraph =
-    decltype(
-      adjointNodes(
-        Indices<value_index>{},
-        ValueNodes{}
-      )
-    );
+    decltype(adjointNodes(indicesOf(Output{}),ValueNodes{}));
 
   using AdjointNodes = decltype(nodesOf(AdjointGraph{}));
   using Adjoints = decltype(adjointsOf(AdjointGraph{}));
@@ -2236,11 +2314,8 @@ static void testDotFunction()
   f.set(by,b_val.y);
   f.set(bz,b_val.z);
   f.evaluate();
-
   float value = f.get(c);
   assert(value == dot(a_val,b_val));
-
-
   f.setDeriv(c,1);
   f.evaluateDerivs();
   float dax = f.getDeriv(ax);
@@ -2249,11 +2324,65 @@ static void testDotFunction()
   float dbx = f.getDeriv(bx);
   float dby = f.getDeriv(by);
   float dbz = f.getDeriv(bz);
-
   Vec3f da_val = {dax,day,daz};
   Vec3f db_val = {dbx,dby,dbz};
   assert(da_val == vec3(4,5,6));
   assert(db_val == vec3(1,2,3));
+}
+
+
+static void testDivFunction()
+{
+  auto a = var<struct A>();
+  auto b = var<struct B>();
+  auto c = a/b;
+  float a_val = 5;
+  float b_val = 6;
+  Function< decltype(c) > f;
+  f.set(a,a_val);
+  f.set(b,b_val);
+  f.evaluate();
+  assert(f.get(c) == a_val/b_val);
+  f.setDeriv(c,1);
+  f.evaluateDerivs();
+  float da = f.getDeriv(a);
+  float db = f.getDeriv(b);
+  assert(da == 1/6.0f);
+  float expected_db = -5/float(6*6);
+  assert(db == expected_db);
+}
+
+
+template <size_t x,size_t y,size_t z>
+static auto indicesOf(Vec3Indices<x,y,z>)
+{
+  return Indices<x,y,z>{};
+}
+
+
+template <size_t... args1,size_t... args2>
+static auto merge(Indices<args1...>,Indices<args2...>)
+{
+  return Indices<args1...,args2...>{};
+}
+
+template <size_t... args1,size_t... args2,size_t... args3>
+static auto merge(Indices<args1...>,Indices<args2...>,Indices<args3...>)
+{
+  return Indices<args1...,args2...,args3...>{};
+}
+
+template <typename Row0,typename Row1,typename Row2>
+static auto indicesOf(Mat33Indices<Row0,Row1,Row2>)
+{
+  return merge(indicesOf(Row0{}),indicesOf(Row1{}),indicesOf(Row2{}));
+}
+
+
+template <typename Q,typename R>
+static auto indicesOf(QR<Q,R>)
+{
+  return merge(indicesOf(Q{}),indicesOf(R{}));
 }
 
 
@@ -2271,10 +2400,11 @@ static void testQRDecompFunction()
   // It needs to be that way so that the qrDecomposition() function is
   // agnostic to the representation of the result.
   using MergeResult = decltype(merge(nodesOf(qr.q),nodesOf(qr.r)));
-  using MergedNodes = decltype(nodesOf(MergeResult{}));
+  using QRNodes = decltype(nodesOf(MergeResult{}));
+  using QIndices = decltype(outputOf(qr.q));
   using RMap = decltype(mapBOf(MergeResult{}));
-  using MappedR = decltype(map(qr.r, RMap{}));
-  Function< decltype(nodesIndicesOf(qr)), decltype(nodesOf(qr)) > f;
+  using RIndices = decltype(mappedIndices(outputOf(qr.r), RMap{}));
+  Function< Graph<QR<QIndices,RIndices>,QRNodes> > f;
   Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec(7,8,9));
 
   f.set(a,a_val);
@@ -2401,6 +2531,7 @@ int main()
   testDotAdjointNodes();
   testMulFunction();
   testDotFunction();
+  testDivFunction();
 #if ADD_TEST
   testQRDecompFunction();
 #endif

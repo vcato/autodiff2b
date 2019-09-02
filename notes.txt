@@ -86,10 +86,46 @@ index.  It seems more natural if we are just calculating the adjoint of
 every node, and then we use what we want.
 
 If we do that, it means every node could have an effect on the ultimate
-output, so we'd have to have a way to inject these derivatives.
+output, so we'd have to have a way to inject derivatives for every node.
 
 That makes some sense.  We might end up with functions where we return
 one calculated value, but also use that calculated value in other ways.
 It seems like we're being wasteful if we have a node for the "initial"
 derivative of every node.  We would be initializing a lot of things to zero
 at runtime which could have been optimized away.
+
+If we wanted to create a graph which had the original function values and
+the derivative of the outputs as input and produced the derivatives of
+the inputs, how would we do it?
+
+Seems like it would have to have nodes which were Var<Deriv<i>>
+And we'd have to return a graph which had a tuple of indices of the
+derivatives of the inputs as its output.
+
+f(a,b) = a*b
+df(a,b,dresult) = (dresult*b,dresult*a)
+
+
+f(args) = result
+d(f)(args,dresult) = dargs
+
+So if we treat a function as having a single input which could be a tuple,
+then the derivative function would take a tuple of the args and the
+derivative of the result and returns the derivative of the args.
+
+So what is a function?
+It would be a set of nodes and an indication of which nodes were inputs
+and which nodes were outputs.
+
+Graph<
+  FunctionIndices<
+    /*inputs*/TupleIndices<ScalarIndices<0>,ScalarIndices<1>>,
+    /*outputs*/ScalarIndices<2>
+  >,
+  List<Nodes...>
+>
+
+
+It's interesting that this has the same basic structure as a variable.
+It doesn't work the same way though, because the nodes are in a different
+scope, so we wouldn't merge them with our other nodes.
