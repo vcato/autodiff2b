@@ -7,6 +7,7 @@
 
 #define ADD_QR_DECOMP 0
 #define ADD_TEST 0
+#define ADD_TEST2 0
 
 
 using std::cerr;
@@ -40,11 +41,7 @@ template <size_t...> struct Indices {};
 
 namespace {
 
-template <typename Output,typename Nodes> struct Graph
-{
-  operator float() const;
-};
-
+template <typename Output,typename Nodes> struct Graph { };
 
 template <typename Output,typename Nodes>
 Nodes nodesOf(Graph<Output,Nodes>);
@@ -57,6 +54,14 @@ Output outputOf(Graph<Output,Nodes>);
 
 namespace {
 template <size_t> struct ScalarIndices {};
+}
+
+
+namespace {
+template <size_t index,typename Nodes>
+struct Graph<ScalarIndices<index>,Nodes> {
+  operator float() const;
+};
 }
 
 
@@ -299,8 +304,8 @@ static float
 }
 
 
-template <typename Output,typename Nodes>
-Graph<Output,Nodes>::operator float() const
+template <size_t index,typename Nodes>
+Graph<ScalarIndices<index>,Nodes>::operator float() const
 {
   return floatValue(*this);
 }
@@ -715,6 +720,30 @@ struct Vec3Indices {};
 }
 
 
+namespace {
+template <size_t x,size_t y,size_t z,typename Nodes>
+struct Graph<Vec3Indices<x,y,z>,Nodes> {
+  operator Vec3f() const;
+};
+}
+
+
+static Vec3f vec3(float x,float y,float z)
+{
+  return Vec3f{x,y,z};
+}
+
+
+template <size_t xi,size_t yi,size_t zi,typename Nodes>
+Graph<Vec3Indices<xi,yi,zi>,Nodes>::operator Vec3f() const
+{
+  float x = xValue(*this);
+  float y = yValue(*this);
+  float z = zValue(*this);
+  return vec3(x,y,z);
+}
+
+
 template <size_t index,typename Map>
 static auto mappedIndices(ScalarIndices<index>,Map)
 {
@@ -798,9 +827,17 @@ static auto row(const Graph<Mat33Indices<Row0,Row1,Row2>,Nodes>,Indexed<2>)
 }
 
 
-static Vec3f vec3(float x,float y,float z)
-{
-  return Vec3f{x,y,z};
+namespace {
+template <typename Row0,typename Row1,typename Row2,typename Nodes>
+struct Graph<Mat33Indices<Row0,Row1,Row2>,Nodes> {
+  operator Mat33f() const
+  {
+    Vec3f row0 = row<0>(*this);
+    Vec3f row1 = row<1>(*this);
+    Vec3f row2 = row<2>(*this);
+    return mat33(row0,row1,row2);
+  }
+};
 }
 
 
@@ -1344,21 +1381,6 @@ static auto
 }
 
 
-template <typename Col0,typename Col1,typename Col2>
-static auto columns(
-  Col0 &col0,
-  Col1 &col1,
-  Col2 &col2
-)
-{
-  return mat33(
-    vec3(xValue(col0),xValue(col1),xValue(col2)),
-    vec3(yValue(col0),yValue(col1),yValue(col2)),
-    vec3(zValue(col0),zValue(col1),zValue(col2))
-  );
-}
-
-
 template <size_t x,size_t y,size_t z,typename Nodes>
 static auto xValue(Graph<Vec3Indices<x,y,z>,Nodes>)
 {
@@ -1377,6 +1399,31 @@ template <size_t x,size_t y,size_t z,typename Nodes>
 static auto zValue(Graph<Vec3Indices<x,y,z>,Nodes>)
 {
   return Graph<ScalarIndices<z>,Nodes>{};
+}
+
+
+template <typename Col0,typename Col1,typename Col2>
+static auto columns(
+  Col0 &col0,
+  Col1 &col1,
+  Col2 &col2
+)
+{
+  auto m00 = xValue(col0);
+  auto m01 = xValue(col1);
+  auto m02 = xValue(col2);
+  auto m10 = yValue(col0);
+  auto m11 = yValue(col1);
+  auto m12 = yValue(col2);
+  auto m20 = zValue(col0);
+  auto m21 = zValue(col1);
+  auto m22 = zValue(col2);
+
+  return mat33(
+    vec3(m00,m01,m02),
+    vec3(m10,m11,m12),
+    vec3(m20,m21,m22)
+  );
 }
 
 
@@ -1480,6 +1527,43 @@ template <typename Q,typename R>
 static QR<Q,R> qr(const Q &q,const R &r)
 {
   return {q,r};
+}
+
+
+template <typename A>
+static auto qrDecompositionTest(const A &)
+{
+  auto zero = constant<Zero>();
+#if 0
+  auto a1 = col<0>(a);
+  auto a2 = col<1>(a);
+  auto a3 = col<2>(a);
+  auto u1 = a1;
+  auto r11 = mag(u1);
+  auto q1 = u1/r11;
+  auto r12 = dot(a2,q1);
+  auto u2 = a2 - q1*r12;
+  auto r22 = mag(u2);
+  auto q2 = u2/r22;
+  auto r13 = dot(q1,a3);
+  auto r23 = dot(q2,a3);
+  auto u3 = a3 - q1*r13 - q2*r23;
+  auto r33 = mag(u3);
+  auto q3 = u3/r33;
+  auto row0 = vec3( r11, r12,r13);
+  auto row1 = vec3(zero, r22,r23);
+  auto row2 = vec3(zero,zero,r33);
+#else
+  auto row0 = vec3(zero,zero,zero);
+  auto row1 = vec3(zero,zero,zero);
+  auto row2 = vec3(zero,zero,zero);
+  auto q1 = vec3(zero,zero,zero);
+  auto q2 = vec3(zero,zero,zero);
+  auto q3 = vec3(zero,zero,zero);
+#endif
+  auto r = mat33(row0,row1,row2);
+  auto q = columns(q1,q2,q3);
+  return qr(q,r);
 }
 
 
@@ -2627,15 +2711,14 @@ static auto getValue3(QR<Q,R>,const Values &values)
 }
 
 
-#if ADD_TEST
-static void testQRDecompFunction()
+#if ADD_TEST2
+static void testQRDecompFunctionTest()
 {
   std::mt19937 engine(/*seed*/1);
   auto a = mat33Var<struct A>();
-  auto qr = qrDecomposition(a);
+  auto qr = qrDecompositionTest(a);
   Mat33f dr = randomMat33(engine);
   Mat33f dq = randomMat33(engine);
-  auto dqr = ::qr(dq,dr);
 
   // qr is a QR<Q,R>, where Q and R are graphs with their own nodes.
   // It needs to be that way so that the qrDecomposition() function is
@@ -2645,18 +2728,96 @@ static void testQRDecompFunction()
   using QIndices = decltype(outputOf(qr.q));
   using RMap = decltype(mapBOf(MergeResult{}));
   using RIndices = decltype(mappedIndices(outputOf(qr.r), RMap{}));
+  auto q = Graph<QIndices,QRNodes>{};
+  auto r = Graph<RIndices,QRNodes>{};
   Function< Graph<QR<QIndices,RIndices>,QRNodes> > f;
   Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec3(7,8,9));
 
   f.set(a,a_val);
   f.evaluate();
-  Mat33f q_val = f.get(qr.q);
-  Mat33f r_val = f.get(qr.r);
+  Mat33f q_val = f.get(q);
+  Mat33f r_val = f.get(r);
+  auto expected_qr = qrDecompositionTest(a_val);
+  assert(q_val == expected_qr.q);
+  assert(r_val == expected_qr.r);
+  f.setDeriv(q, dq);
+  f.setDeriv(r, dr);
+  f.evaluateDerivs();
+
+  Mat33f da = f.getDeriv(a);
+    // This fails when a has no impact on the result
+
+  for (size_t i=0; i!=3; ++i) {
+    for (size_t j=0; j!=3; ++j) {
+      float sum = 0;
+
+      for (size_t i2=0; i2!=3; ++i2) {
+        for (size_t j2=0; j2!=3; ++j2) {
+          auto q_a =
+            [&,i2,j2]{ return qrDecompositionTest(a_val).q.values[i2][j2]; };
+
+          sum += finiteDeriv(q_a, a_val.values[i][j]) * dq.values[i2][j2];
+        }
+      }
+
+      for (size_t i2=0; i2!=3; ++i2) {
+        for (size_t j2=0; j2!=3; ++j2) {
+          auto r_a =
+            [&,i2,j2]{ return qrDecompositionTest(a_val).r.values[i2][j2]; };
+
+          sum += finiteDeriv(r_a, a_val.values[i][j]) * dr.values[i2][j2];
+        }
+      }
+
+      cerr << "da[" << i << "][" << j << "] = " << da.values[i][j] << ", "
+        "fda=" << sum << "\n";
+      assertNear(da.values[i][j],sum,0);
+    }
+  }
+
+  // Verify that the derivatives are correct.
+  assert(false);
+
+  // da is d(error)/d(a) given d(error)/d(qr)
+  // How do we verify this?
+  // fda[i][j] =
+  //   sum{i2,j2}(d(q[i2][j2])/d(a[i][j])*dq[i2][j2]) +
+  //   sum{i2,j2}(d(r[i2][j2])/d(a[i][j])*dr[i2][j2]) +
+}
+#endif
+
+
+#if ADD_TEST
+static void testQRDecompFunction()
+{
+  std::mt19937 engine(/*seed*/1);
+  auto a = mat33Var<struct A>();
+  auto qr = qrDecomposition(a);
+  Mat33f dr = randomMat33(engine);
+  Mat33f dq = randomMat33(engine);
+
+  // qr is a QR<Q,R>, where Q and R are graphs with their own nodes.
+  // It needs to be that way so that the qrDecomposition() function is
+  // agnostic to the representation of the result.
+  using MergeResult = decltype(merge(nodesOf(qr.q),nodesOf(qr.r)));
+  using QRNodes = decltype(nodesOf(MergeResult{}));
+  using QIndices = decltype(outputOf(qr.q));
+  using RMap = decltype(mapBOf(MergeResult{}));
+  using RIndices = decltype(mappedIndices(outputOf(qr.r), RMap{}));
+  auto q = Graph<QIndices,QRNodes>{};
+  auto r = Graph<RIndices,QRNodes>{};
+  Function< Graph<QR<QIndices,RIndices>,QRNodes> > f;
+  Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec3(7,8,9));
+
+  f.set(a,a_val);
+  f.evaluate();
+  Mat33f q_val = f.get(q);
+  Mat33f r_val = f.get(r);
   QR<Mat33f,Mat33f> expected_qr = qrDecomposition(a_val);
   assert(q_val == expected_qr.q);
   assert(r_val == expected_qr.r);
-  f.setDeriv(qr.q,dqr.q);
-  f.setDeriv(qr.r,dqr.r);
+  f.setDeriv(q, dq);
+  f.setDeriv(r, dr);
   f.evaluateDerivs();
   Mat33f da = f.getDeriv(a);
 
@@ -2808,6 +2969,9 @@ int main()
   testDotFunction();
   testDivFunction();
   testSqrtFunction();
+#if ADD_TEST2
+  testQRDecompFunctionTest();
+#endif
 #if ADD_TEST
   testQRDecompFunction();
 #endif

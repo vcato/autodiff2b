@@ -129,3 +129,21 @@ Graph<
 It's interesting that this has the same basic structure as a variable.
 It doesn't work the same way though, because the nodes are in a different
 scope, so we wouldn't merge them with our other nodes.
+---
+It seems like a big issue that we can't mix regular values and graph values.
+How do we make a single function which can be either?
+What if we need to take the dot product of a vec3 made of variables with a vec3
+made of constants?
+
+If we have graphs so that they can contain runtime values, then it seems to
+solve the problem, but it's harder to guarantee efficient evaluation.
+It would be good if we could maintain constexpr status.  For example, if
+we have x*2, we'd like this to be constexpr.  If we end up creating a graph
+which has non-type constexpr nodes, then this is still good.  We should
+be able to create constexpr functions which create the adjoint graph.
+
+Do we end up creating graphs that have a set of constant values?  Like
+a map from node indices to values.
+
+This is still awkward, since we can't do things like fold the same constant
+values into a single node.
