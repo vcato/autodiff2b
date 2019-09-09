@@ -2106,6 +2106,27 @@ static auto
 }
 
 
+template <size_t zero_node>
+static auto makeZeroAdjoints2(Indexed</*node_count*/0>,Indexed<zero_node>)
+{
+  return Empty{};
+}
+
+
+template <size_t node_count,size_t zero_node,typename ResultAdjointMap>
+static auto
+  makeZeroAdjoints2(Indexed<node_count>,Indexed<zero_node>,ResultAdjointMap)
+{
+  using First =
+    decltype(makeZeroAdjoints(Indexed<node_count-1>{},Indexed<zero_node>{}));
+
+  constexpr size_t x =
+    decltype(findAdjoint(ResultAdjointMap{},Indexed<node_count-1>{}))::value;
+
+  return MapList<First,MapEntry<node_count-1,x>>{};
+}
+
+
 template <typename Adjoints,typename Nodes,size_t result_index>
 static auto
   addAdjoint(AdjointGraph<Adjoints,Nodes>,Indexed<result_index>)
@@ -2193,6 +2214,61 @@ static auto adjointNodes(ResultIndices,List<Nodes...>)
   using NodesWithDResult = decltype(nodesOf(AdjointGraph2{}));
 
   // Process the nodes in reverse, adding new nodes and updating the adjoints.
+  using RevResult =
+    decltype(
+      revNodes(
+        AdjointGraph<Adjoints2,NodesWithDResult>{},
+        List<Nodes...>{}
+      )
+    );
+
+  using NewNodes = decltype(nodesOf(RevResult{}));
+  using NewAdjoints = decltype(adjointsOf(RevResult{}));
+  return AdjointGraph<NewAdjoints,NewNodes>{};
+}
+
+
+// Create the nodes that contain the adjoints by going through a forward
+// and reverse pass.  In the forward pass, we introduce an adjoint node
+// for each node.  In the reverse pass, we update the adjoint nodes.
+template <
+  typename... Nodes,
+  typename ResultIndices,
+  typename ResultAdjointMap
+>
+static auto adjointNodes2(ResultIndices,ResultAdjointMap,List<Nodes...>)
+{
+  // Add a zero node to the nodes if we don't have one, since we'll need
+  // to initialize all the adjoints to this.
+  using InsertResult = decltype(insertNode(List<Nodes...>{},Const<Zero>{}));
+  using NodesWithZero = decltype(newNodesOf(InsertResult{}));
+  constexpr size_t zero_index = newIndexOf(InsertResult{});
+
+  // Build the initial set of adjoints.  If we have adjoints in the
+  // ResultAdjointIndices, we can use those, otherwise we use zero.
+  using Adjoints =
+    decltype(
+      makeZeroAdjoints2(
+        Indexed<sizeof...(Nodes)>{},
+        Indexed<zero_index>{},
+        MapWithDefault<ResultAdjointMap,zero_index>{}
+      )
+    );
+
+  using AdjointGraph2 =
+    decltype(
+      addAdjoints(
+        AdjointGraph<Adjoints,NodesWithZero>{},
+        ResultIndices{}
+      )
+    );
+
+  using Adjoints2 = decltype(adjointsOf(AdjointGraph2{}));
+  using NodesWithDResult = decltype(nodesOf(AdjointGraph2{}));
+
+  // Process the nodes in reverse, adding new nodes and updating the adjoints.
+  // If we encounter a node which has adjoint values, then those need to
+  // be added in.
   using RevResult =
     decltype(
       revNodes(
@@ -2754,6 +2830,128 @@ struct Function< Graph<Output,ValueNodes> >
 }
 
 
+namespace {
+template <size_t index,size_t adjoint_index>
+static auto makeMap(ScalarIndices<index>,ScalarIndices<adjoint_index>)
+{
+  return MapList<Empty,MapEntry<index,adjoint_index>>{};
+}
+}
+
+
+namespace {
+template <typename Graph, typename AdjointGraph> struct Function2;
+
+template <
+  typename Output,
+  typename ValueNodes,
+  typename AdjointOutput,
+  typename AdjointValueNodes
+>
+struct
+  Function2<
+    Graph<Output,ValueNodes>,
+    Graph<AdjointOutput,AdjointValueNodes>
+  >
+{
+  using ValueGraph = Graph<Output,ValueNodes>;
+
+  using AdjointGraph =
+    decltype(
+      adjointNodes2(
+        indicesOf(Output{}),
+        makeMap(Output{},AdjointOutput{}),
+          // This needs to be a map that goes from output indices to
+          // the adjoint of the output.
+
+        ValueNodes{}
+      )
+    );
+
+  using AdjointNodes = decltype(nodesOf(AdjointGraph{}));
+  using Adjoints = decltype(adjointsOf(AdjointGraph{}));
+
+  // Given a Graph, find the indices of the nodes in this function's
+  // graph which correspond to the nodes in the given graph.
+  template <typename OutputArg,typename Nodes>
+  static auto mappedIndices(Graph<OutputArg,Nodes>)
+  {
+    using MergeResult = decltype(merge(AdjointNodes{},Nodes{}));
+    using Map = decltype(mapBOf(MergeResult{}));
+    return ::mappedIndices(OutputArg{},Map{});
+  }
+
+  template <typename G>
+  static constexpr size_t derivIndex(G)
+  {
+    constexpr size_t index = mappedIndex(G{});
+    return findAdjoint(Adjoints{},Indexed<index>{});
+  }
+
+  template <typename G>
+  static auto derivIndices(G)
+  {
+    using MappedIndices = decltype(mappedIndices(G{}));
+    constexpr size_t null_index = n_values;
+
+    return
+      ::adjointIndices(
+        MappedIndices{},
+        MapWithDefault<Adjoints,null_index>{}
+      );
+  }
+
+  static constexpr size_t dresult_index = derivIndex(ValueGraph{});
+  static constexpr size_t n_values = sizeOf(AdjointNodes{});
+  float values[n_values];
+
+  template <typename Graph,typename T>
+  void set(Graph,const T& value)
+  {
+    setValue2(Graph{},value,values,AdjointNodes{});
+  }
+
+  void evaluate()
+  {
+    constexpr size_t n_value_nodes = listSize<ValueNodes>;
+    ::evaluate<0,n_value_nodes>(AdjointNodes{},values);
+  }
+
+  template <typename OutputArg,typename NodesArg>
+  auto get(Graph<OutputArg,NodesArg>) const
+  {
+    return getValue3(mappedIndices(Graph<OutputArg,NodesArg>{}),values);
+  }
+
+  template <typename Graph,typename T>
+  void setDeriv(Graph,const T& value)
+  {
+    setValue3(derivIndices(Graph{}),value,values);
+  }
+
+  void evaluateDerivs()
+  {
+    constexpr size_t n_value_nodes = listSize<ValueNodes>;
+    if (debug) {
+      cerr << "Evaluating nodes " << n_value_nodes << " up to " <<
+        n_values << "\n";
+    }
+    ::evaluate<n_value_nodes,n_values>(AdjointNodes(),values);
+  }
+
+  template <typename Graph>
+  auto getDeriv(Graph) const
+  {
+    using DerivIndices = decltype(derivIndices(Graph{}));
+    // We need to be able to get derivatives for values that aren't in the
+    // graph.  In this case, we should return 0.  To make this work, we
+    // have a special DefaultZero type.
+    return getValue3(DerivIndices{},DefaultZero<n_values>{values});
+  }
+};
+}
+
+
 
 static void testMulFunction()
 {
@@ -2768,6 +2966,28 @@ static void testMulFunction()
   f.evaluate();
   assert(f.get(c) == a_val*b_val);
   f.setDeriv(c,1);
+  f.evaluateDerivs();
+  float da = f.getDeriv(a);
+  float db = f.getDeriv(b);
+  assert(da == 6);
+  assert(db == 5);
+}
+
+
+static void testMulFunction2()
+{
+  auto a = var<struct A>();
+  auto b = var<struct B>();
+  auto c = a*b;
+  auto dc = var<struct DC>();
+  float a_val = 5;
+  float b_val = 6;
+  Function2< decltype(c), decltype(dc) > f;
+  f.set(a,a_val);
+  f.set(b,b_val);
+  f.evaluate();
+  assert(f.get(c) == a_val*b_val);
+  f.set(dc,1);
   f.evaluateDerivs();
   float da = f.getDeriv(a);
   float db = f.getDeriv(b);
@@ -3296,6 +3516,7 @@ int main()
   testAdjointNodes();
   testDotAdjointNodes();
   testMulFunction();
+  testMulFunction2();
   testDotFunction();
   testDivFunction();
   testSqrtFunction();
