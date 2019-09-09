@@ -6,9 +6,6 @@
 #include <type_traits>
 
 #define ADD_QR_DECOMP 0
-#define ADD_TEST 0
-#define ADD_TEST2 0
-#define ADD_TEST3 0
 
 
 using std::cerr;
@@ -987,6 +984,13 @@ static auto mappedIndices(Mat33Indices<Row0,Row1,Row2>,Map)
 }
 
 
+template <size_t... indices,typename Map>
+static auto mappedIndices(Indices<indices...>,Map)
+{
+  return Indices<mapped_index<indices,Map>...>{};
+}
+
+
 template <typename Row0,typename Row1,typename Row2,typename Map>
 static auto adjointIndices(Mat33Indices<Row0,Row1,Row2>,Map)
 {
@@ -1704,43 +1708,6 @@ static QR<Q,R> qr(const Q &q,const R &r)
 
 
 template <typename A>
-static auto qrDecompositionTest(const A &a)
-{
-  auto zero = constant<Zero>();
-  auto a1 = col<0>(a);
-  auto a2 = col<1>(a);
-  auto a3 = col<2>(a);
-  auto u1 = a1;
-  auto r11 = mag(u1);
-#if 0
-  auto q1 = u1/r11;
-  auto r12 = dot(a2,q1);
-  auto u2 = a2 - q1*r12;
-  auto r22 = mag(u2);
-  auto q2 = u2/r22;
-  auto r13 = dot(q1,a3);
-  auto r23 = dot(q2,a3);
-  auto u3 = a3 - q1*r13 - q2*r23;
-  auto r33 = mag(u3);
-  auto q3 = u3/r33;
-  auto row0 = vec3( r11, r12,r13);
-  auto row1 = vec3(zero, r22,r23);
-  auto row2 = vec3(zero,zero,r33);
-#else
-  auto row0 = u1;
-  auto row1 = a2;
-  auto row2 = a3;
-  auto q1 = vec3(r11,zero,zero);
-  auto q2 = vec3(zero,zero,zero);
-  auto q3 = vec3(zero,zero,zero);
-#endif
-  auto r = mat33(row0,row1,row2);
-  auto q = columns(q1,q2,q3);
-  return qr(q,r);
-}
-
-
-template <typename A>
 static auto test3Func(const A &a)
 {
   auto r = a;
@@ -2043,7 +2010,13 @@ static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Div<i,j>>)
   constexpr size_t j2 = newIndexOf(J2{});
   using Nodes2 = decltype(newNodesOf(J2{}));
 
-  return subExpr(AdjointGraph<Adjoints2,Nodes2>{},Indexed<j>{},Div<i,j2>{});
+  using IDIVJ2 = decltype(insertNode(Nodes2{},Div<i,j2>{}));
+  constexpr size_t i_div_j2 = newIndexOf(IDIVJ2{});
+  using Nodes3 = decltype(newNodesOf(IDIVJ2{}));
+  return
+    subExpr(
+      AdjointGraph<Adjoints2,Nodes3>{},Indexed<j>{},Mul<adjoint_k,i_div_j2>{}
+    );
 }
 
 
@@ -2106,8 +2079,13 @@ static auto
 }
 
 
-template <size_t zero_node>
-static auto makeZeroAdjoints2(Indexed</*node_count*/0>,Indexed<zero_node>)
+template <size_t zero_node,typename ResultAdjointMap>
+static auto
+  makeZeroAdjoints2(
+    Indexed</*node_count*/0>,
+    Indexed<zero_node>,
+    ResultAdjointMap
+  )
 {
   return Empty{};
 }
@@ -2118,7 +2096,13 @@ static auto
   makeZeroAdjoints2(Indexed<node_count>,Indexed<zero_node>,ResultAdjointMap)
 {
   using First =
-    decltype(makeZeroAdjoints(Indexed<node_count-1>{},Indexed<zero_node>{}));
+    decltype(
+      makeZeroAdjoints2(
+        Indexed<node_count-1>{},
+        Indexed<zero_node>{},
+        ResultAdjointMap{}
+      )
+    );
 
   constexpr size_t x =
     decltype(findAdjoint(ResultAdjointMap{},Indexed<node_count-1>{}))::value;
@@ -2244,9 +2228,7 @@ static auto adjointNodes2(ResultIndices,ResultAdjointMap,List<Nodes...>)
   using NodesWithZero = decltype(newNodesOf(InsertResult{}));
   constexpr size_t zero_index = newIndexOf(InsertResult{});
 
-  // Build the initial set of adjoints.  If we have adjoints in the
-  // ResultAdjointIndices, we can use those, otherwise we use zero.
-  using Adjoints =
+  using Adjoints2 =
     decltype(
       makeZeroAdjoints2(
         Indexed<sizeof...(Nodes)>{},
@@ -2255,16 +2237,7 @@ static auto adjointNodes2(ResultIndices,ResultAdjointMap,List<Nodes...>)
       )
     );
 
-  using AdjointGraph2 =
-    decltype(
-      addAdjoints(
-        AdjointGraph<Adjoints,NodesWithZero>{},
-        ResultIndices{}
-      )
-    );
-
-  using Adjoints2 = decltype(adjointsOf(AdjointGraph2{}));
-  using NodesWithDResult = decltype(nodesOf(AdjointGraph2{}));
+  using NodesWithDResult = NodesWithZero;
 
   // Process the nodes in reverse, adding new nodes and updating the adjoints.
   // If we encounter a node which has adjoint values, then those need to
@@ -2736,111 +2709,66 @@ auto indicesOf(ScalarIndices<index>)
 
 
 namespace {
-template <typename Graph> struct Function;
-
-template <typename Output,typename ValueNodes>
-struct Function< Graph<Output,ValueNodes> >
+template <typename Result>
+static auto buildMap(Result,Indices<>,Indices<>)
 {
-  using ValueGraph = Graph<Output,ValueNodes>;
-
-  using AdjointGraph =
-    decltype(adjointNodes(indicesOf(Output{}),ValueNodes{}));
-
-  using AdjointNodes = decltype(nodesOf(AdjointGraph{}));
-  using Adjoints = decltype(adjointsOf(AdjointGraph{}));
-
-  // Given a Graph, find the indices of the nodes in this function's
-  // graph which correspond to the nodes in the given graph.
-  template <typename OutputArg,typename Nodes>
-  static auto mappedIndices(Graph<OutputArg,Nodes>)
-  {
-    using MergeResult = decltype(merge(AdjointNodes{},Nodes{}));
-    using Map = decltype(mapBOf(MergeResult{}));
-    return ::mappedIndices(OutputArg{},Map{});
-  }
-
-  template <typename G>
-  static constexpr size_t derivIndex(G)
-  {
-    constexpr size_t index = mappedIndex(G{});
-    return findAdjoint(Adjoints{},Indexed<index>{});
-  }
-
-  template <typename G>
-  static auto derivIndices(G)
-  {
-    using MappedIndices = decltype(mappedIndices(G{}));
-    constexpr size_t null_index = n_values;
-
-    return
-      ::adjointIndices(
-        MappedIndices{},
-        MapWithDefault<Adjoints,null_index>{}
-      );
-  }
-
-  static constexpr size_t dresult_index = derivIndex(ValueGraph{});
-  static constexpr size_t n_values = sizeOf(AdjointNodes{});
-  float values[n_values];
-
-  template <typename Graph,typename T>
-  void set(Graph,const T& value)
-  {
-    setValue2(Graph{},value,values,AdjointNodes{});
-  }
-
-  void evaluate()
-  {
-    constexpr size_t n_value_nodes = listSize<ValueNodes>;
-    ::evaluate<0,n_value_nodes>(AdjointNodes{},values);
-  }
-
-  template <typename OutputArg,typename NodesArg>
-  auto get(Graph<OutputArg,NodesArg>) const
-  {
-    return getValue3(mappedIndices(Graph<OutputArg,NodesArg>{}),values);
-  }
-
-  template <typename Graph,typename T>
-  void setDeriv(Graph,const T& value)
-  {
-    setValue3(derivIndices(Graph{}),value,values);
-  }
-
-  void evaluateDerivs()
-  {
-    constexpr size_t n_value_nodes = listSize<ValueNodes>;
-    if (debug) {
-      cerr << "Evaluating nodes " << n_value_nodes << " up to " <<
-        n_values << "\n";
-    }
-    ::evaluate<n_value_nodes,n_values>(AdjointNodes(),values);
-  }
-
-  template <typename Graph>
-  auto getDeriv(Graph) const
-  {
-    using DerivIndices = decltype(derivIndices(Graph{}));
-    // We need to be able to get derivatives for values that aren't in the
-    // graph.  In this case, we should return 0.  To make this work, we
-    // have a special DefaultZero type.
-    return getValue3(DerivIndices{},DefaultZero<n_values>{values});
-  }
-};
-}
-
-
-namespace {
-template <size_t index,size_t adjoint_index>
-static auto makeMap(ScalarIndices<index>,ScalarIndices<adjoint_index>)
-{
-  return MapList<Empty,MapEntry<index,adjoint_index>>{};
+  return Result{};
 }
 }
 
 
 namespace {
-template <typename Graph, typename AdjointGraph> struct Function2;
+template <typename Result,size_t index,size_t adjoint_index,size_t... indices,size_t... adjoint_indices>
+static auto
+  buildMap(
+    Result,
+    Indices<index,indices...>,
+    Indices<adjoint_index,adjoint_indices...>
+  )
+{
+  return
+    buildMap(
+      MapList<Result,MapEntry<index,adjoint_index>>{},
+      Indices<indices...>{},
+      Indices<adjoint_indices...>{}
+    );
+}
+}
+
+
+namespace {
+template <typename Indices,typename AdjointIndices>
+static auto makeMap(Indices,AdjointIndices)
+{
+  return buildMap(Empty{},Indices{},AdjointIndices{});
+}
+}
+
+
+namespace {
+template <
+  size_t index1,
+  size_t index2,
+  size_t adjoint_index1,
+  size_t adjoint_index2
+>
+static auto
+  makeMap(Indices<index1,index2>,Indices<adjoint_index1,adjoint_index2>)
+{
+  return
+    MapList<
+      MapList<
+        Empty,
+        MapEntry<index1,adjoint_index1>
+      >,
+      MapEntry<index2,adjoint_index2>
+    >{};
+}
+}
+
+
+namespace {
+template <typename Graph, typename AdjointGraph> struct Function;
 
 template <
   typename Output,
@@ -2849,22 +2777,32 @@ template <
   typename AdjointValueNodes
 >
 struct
-  Function2<
+  Function<
     Graph<Output,ValueNodes>,
     Graph<AdjointOutput,AdjointValueNodes>
   >
 {
   using ValueGraph = Graph<Output,ValueNodes>;
 
+  // Merge the output graph and the adjoint output graph so that
+  // we have a common set of nodes to work with.
+  using MergeResult = decltype(merge(ValueNodes{},AdjointValueNodes{}));
+  using CommonOutputNodes = decltype(nodesOf(MergeResult{}));
+
+  using MappedAdjointValueIndices =
+    decltype(
+      ::mappedIndices(indicesOf(AdjointOutput{}),mapBOf(MergeResult{}))
+    );
+
   using AdjointGraph =
     decltype(
       adjointNodes2(
         indicesOf(Output{}),
-        makeMap(Output{},AdjointOutput{}),
-          // This needs to be a map that goes from output indices to
-          // the adjoint of the output.
-
-        ValueNodes{}
+        makeMap(
+          indicesOf(Output{}),
+          MappedAdjointValueIndices{}
+        ),
+        CommonOutputNodes{}
       )
     );
 
@@ -2923,12 +2861,6 @@ struct
     return getValue3(mappedIndices(Graph<OutputArg,NodesArg>{}),values);
   }
 
-  template <typename Graph,typename T>
-  void setDeriv(Graph,const T& value)
-  {
-    setValue3(derivIndices(Graph{}),value,values);
-  }
-
   void evaluateDerivs()
   {
     constexpr size_t n_value_nodes = listSize<ValueNodes>;
@@ -2958,31 +2890,10 @@ static void testMulFunction()
   auto a = var<struct A>();
   auto b = var<struct B>();
   auto c = a*b;
-  float a_val = 5;
-  float b_val = 6;
-  Function< decltype(c) > f;
-  f.set(a,a_val);
-  f.set(b,b_val);
-  f.evaluate();
-  assert(f.get(c) == a_val*b_val);
-  f.setDeriv(c,1);
-  f.evaluateDerivs();
-  float da = f.getDeriv(a);
-  float db = f.getDeriv(b);
-  assert(da == 6);
-  assert(db == 5);
-}
-
-
-static void testMulFunction2()
-{
-  auto a = var<struct A>();
-  auto b = var<struct B>();
-  auto c = a*b;
   auto dc = var<struct DC>();
   float a_val = 5;
   float b_val = 6;
-  Function2< decltype(c), decltype(dc) > f;
+  Function< decltype(c), decltype(dc) > f;
   f.set(a,a_val);
   f.set(b,b_val);
   f.evaluate();
@@ -3007,7 +2918,8 @@ static void testDotFunction()
   auto a = vec3(ax,ay,az);
   auto b = vec3(bx,by,bz);
   auto c = dot(a,b);
-  Function< decltype(c) > f;
+  auto dc = var<struct DC>();
+  Function< decltype(c), decltype(dc) > f;
   Vec3f a_val = {1,2,3};
   Vec3f b_val = {4,5,6};
   f.set(ax,a_val.x);
@@ -3019,7 +2931,7 @@ static void testDotFunction()
   f.evaluate();
   float value = f.get(c);
   assert(value == dot(a_val,b_val));
-  f.setDeriv(c,1);
+  f.set(dc,1);
   f.evaluateDerivs();
   float dax = f.getDeriv(ax);
   float day = f.getDeriv(ay);
@@ -3064,23 +2976,25 @@ static void testDivFunction()
   auto a = var<struct A>();
   auto b = var<struct B>();
   auto c = a/b;
+  auto dc = var<struct DC>();
   float a_val = 5;
   float b_val = 6;
-  Function< decltype(c) > f;
+  float dc_val = 0.5;
+  Function< decltype(c), decltype(dc) > f;
   f.set(a,a_val);
   f.set(b,b_val);
   f.evaluate();
   assert(f.get(c) == a_val/b_val);
-  f.setDeriv(c,1);
+  f.set(dc,dc_val);
   f.evaluateDerivs();
   float da = f.getDeriv(a);
   float db = f.getDeriv(b);
-  assert(da == 1/6.0f);
-  float expected_db = -5/float(6*6);
+  assert(da == 1/6.0f*dc_val);
+  float expected_db = -5/float(6*6)*dc_val;
   assert(db == expected_db);
   auto f_ab = [&]{ return a_val/b_val; };
-  float fda = finiteDeriv(f_ab,a_val);
-  float fdb = finiteDeriv(f_ab,b_val);
+  float fda = finiteDeriv(f_ab,a_val)*dc_val;
+  float fdb = finiteDeriv(f_ab,b_val)*dc_val;
   assertNear(da,fda,1e-4);
   assertNear(db,fdb,1e-4);
 }
@@ -3091,19 +3005,20 @@ static void testSqrtFunction()
   auto a = var<struct A>();
   auto b = sqrt(a);
   float a_val = 25;
-  Function< decltype(b) > f;
+  auto db = var<struct DB>();
+  Function< decltype(b), decltype(db) > f;
   f.set(a,a_val);
   f.evaluate();
   assert(f.get(b) == 5);
-  float db = 0.5;
-  f.setDeriv(b,db);
+  float db_val = 0.5;
+  f.set(db,db_val);
   f.evaluateDerivs();
   float da = f.getDeriv(a);
-  float expected_da = 0.5/sqrt(a_val)*db;
+  float expected_da = 0.5/sqrt(a_val)*db_val;
   assert(da == expected_da);
 
   auto f_a = [&]{ return sqrt(a_val); };
-  assertNear(finiteDeriv(f_a,a_val)*db,da,0.002);
+  assertNear(finiteDeriv(f_a,a_val)*db_val,da,0.002);
 }
 
 
@@ -3114,30 +3029,30 @@ static void testMagFunction()
   auto vz = var<struct VZ>();
   auto v = vec3(vx,vy,vz);
   auto a = mag(v);
+  auto da = var<struct DA>();
 
-  // Verify simple case for now.  Use better values later once this works.
   float vx_val = 1;
   float vy_val = 2;
   float vz_val = 3;
 
   Vec3f v_val = vec3(vx_val,vy_val,vz_val);
-  Function< decltype(a) > f;
+  Function< decltype(a), decltype(da) > f;
 
   f.set(v,v_val);
   f.evaluate();
   float mag_v = mag(v_val);
   float a_val = f.get(a);
   assertNear(a_val, mag_v, 0);
-  float da = 0.5;
-  f.setDeriv(a,da);
+  float da_val = 0.5;
+  f.set(da,da_val);
   f.evaluateDerivs();
   Vec3f dv = f.getDeriv(v);
 
   auto f_v = [&]{ return mag(v_val); };
   float tolerance = 0.002;
-  float fdvx = finiteDeriv(f_v, v_val.x)*da;
-  float fdvy = finiteDeriv(f_v, v_val.y)*da;
-  float fdvz = finiteDeriv(f_v, v_val.z)*da;
+  float fdvx = finiteDeriv(f_v, v_val.x)*da_val;
+  float fdvy = finiteDeriv(f_v, v_val.y)*da_val;
+  float fdvz = finiteDeriv(f_v, v_val.z)*da_val;
   assertNear(fdvx,dv.x,tolerance);
   assertNear(fdvy,dv.y,tolerance);
   assertNear(fdvz,dv.z,tolerance);
@@ -3160,70 +3075,37 @@ static auto getValue3(QR<Q,R>,const Values &values)
 }
 
 
-#if ADD_TEST3
 static void test3()
 {
   auto a = var<struct A>();
   auto qr = test3Func(a);
-  float dr = 1;
-  float dq = 0;
+  auto dq = var<struct DQ>();
+  auto dr = var<struct DR>();
+  auto dqr = ::qr(dq,dr);
+  float dr_val = 1;
+  float dq_val = 0;
 
   // qr is a QR<Q,R>, where Q and R are graphs with their own nodes.
   // It needs to be that way so that the qrDecomposition() function is
   // agnostic to the representation of the result.
-  using MergeResult = decltype(merge(nodesOf(qr.q),nodesOf(qr.r)));
-  using QRNodes = decltype(nodesOf(MergeResult{}));
+  using QRMergeResult = decltype(merge(nodesOf(qr.q),nodesOf(qr.r)));
+  using QRNodes = decltype(nodesOf(QRMergeResult{}));
+  using RMap = decltype(mapBOf(QRMergeResult{}));
   using QIndices = decltype(outputOf(qr.q));
-  using RMap = decltype(mapBOf(MergeResult{}));
   using RIndices = decltype(mappedIndices(outputOf(qr.r), RMap{}));
+  using DQRMergeResult = decltype(merge(nodesOf(dqr.q),nodesOf(dqr.r)));
+  using DQRNodes = decltype(nodesOf(DQRMergeResult{}));
+  using DRMap = decltype(mapBOf(DQRMergeResult{}));
+  using DQIndices = decltype(outputOf(dqr.q));
+  using DRIndices = decltype(mappedIndices(outputOf(dqr.r), DRMap{}));
   auto q = Graph<QIndices,QRNodes>{};
   auto r = Graph<RIndices,QRNodes>{};
-  // decltype(r) =
-  //   Graph<
-  //     ScalarIndices<0>,
-  //     List<
-  //       Node<0, Var<test3()::A> >,
-  //       Node<1, Mul<0, 0> >
-  //     >
-  //   >
-  // decltype(q) =
-  //   Graph<
-  //     ScalarIndices<1>,
-  //     List<
-  //       Node<0, Var<test3()::A> >,
-  //       Node<1, Mul<0, 0> >
-  //     >
-  //   >
-  Function< Graph<QR<QIndices,RIndices>,QRNodes> > f;
-  // q = a*a
-  // r = a
-  // da += dr
-  // da += a*dq
-  // da += a*dq
-  // decltype(f)::AdjointNodes =
-  //   List<
-  //     Node<0, Var<test3()::A> >,   0: a
-  //     Node<1, Mul<0, 0> >,         1: a*a
-  //     Node<2, Const<Zero> >,       2: 0
-  //     Node<3, External>,           3: d(a*a) = dq
-  //     Node<4, External>,           4: d(a)   = dr
-  //     Node<5, Mul<3, 0> >,         5: dq*a
-  //     Node<6, Add<4, 5> >,         6: dr + dq*a
-  //     Node<7, Add<6, 5> >          7: dr + dq*a + dq*a
-  //   >
-  //  decltype(f)::Adjoints =
-  //    MapList<
-  //    MapList<
-  //    MapList<
-  //    MapList<
-  //    MapList<
-  //    MapList<Empty,
-  //    MapEntry<0, 2> >,
-  //    MapEntry<1, 2> >,
-  //    MapEntry<1, 3> >,
-  //    MapEntry<0, 4> >,
-  //    MapEntry<0, 6> >,
-  //    MapEntry<0, 7> >
+
+  Function<
+    Graph<QR<QIndices,RIndices>,QRNodes>,
+    Graph<QR<DQIndices,DRIndices>,DQRNodes>
+  > f;
+
   float a_val = 4;
 
   f.set(a,a_val);
@@ -3233,10 +3115,8 @@ static void test3()
   auto expected_qr = test3Func(a_val);
   assertNear(q_val, expected_qr.q, 0);
   assert(r_val == expected_qr.r);
-  debug = true;
-  f.setDeriv(q, dq); // dq = node 3
-  f.setDeriv(r, dr); // dr = node 7?
-  assert(false);
+  f.set(dq, dq_val);
+  f.set(dr, dr_val);
   f.evaluateDerivs();
 
   float da = f.getDeriv(a);
@@ -3246,33 +3126,46 @@ static void test3()
 
   {
     auto q_a = [&]{ return test3Func(a_val).q; };
-    sum += finiteDeriv(q_a, a_val) * dq;
+    sum += finiteDeriv(q_a, a_val) * dq_val;
   }
 
   {
     auto r_a = [&]{ return test3Func(a_val).r; };
-    sum += finiteDeriv(r_a, a_val) * dr;
+    sum += finiteDeriv(r_a, a_val) * dr_val;
   }
 
   assertNear(da,sum,3e-4);
 }
+
+
+#if 0
+static void show(const char *name,const Mat33f &value)
+{
+  cerr << name << ": ";
+
+  for (int i=0; i!=3; ++i) {
+    for (int j=0; j!=3; ++j) {
+      cerr << " " << value.values[i][j];
+    }
+    cerr << "\n";
+  }
+}
 #endif
 
 
-#if ADD_TEST2
-static void testQRDecompFunctionTest()
+
+#if ADD_QR_DECOMP
+static void testQRDecompFunction()
 {
   std::mt19937 engine(/*seed*/1);
   auto a = mat33Var<struct A>();
-  auto qr = qrDecompositionTest(a);
-#if 0
-  Mat33f dr = randomMat33(engine);
-  Mat33f dq = randomMat33(engine);
-#else
-  // Simple test values for now.
-  Mat33f dr = mat33(vec3(1,0,0),vec3(0,0,0),vec3(0,0,0));
-  Mat33f dq = mat33(vec3(0,0,0),vec3(0,0,0),vec3(0,0,0));
-#endif
+  auto qr = qrDecomposition(a);
+  auto dr = mat33Var<struct DR>();
+  auto dq = mat33Var<struct DQ>();
+  auto dqr = ::qr(dq,dr);
+  Mat33f a_val = randomMat33(engine);
+  Mat33f dr_val = randomMat33(engine);
+  Mat33f dq_val = randomMat33(engine);
 
   // qr is a QR<Q,R>, where Q and R are graphs with their own nodes.
   // It needs to be that way so that the qrDecomposition() function is
@@ -3282,23 +3175,32 @@ static void testQRDecompFunctionTest()
   using QIndices = decltype(outputOf(qr.q));
   using RMap = decltype(mapBOf(MergeResult{}));
   using RIndices = decltype(mappedIndices(outputOf(qr.r), RMap{}));
+  using DQRMergeResult = decltype(merge(nodesOf(dqr.q),nodesOf(dqr.r)));
+  using DRMap = decltype(mapBOf(DQRMergeResult{}));
+  using DQIndices = decltype(outputOf(dqr.q));
+  using DRIndices = decltype(mappedIndices(outputOf(dqr.r), DRMap{}));
+  using DQRNodes = decltype(nodesOf(DQRMergeResult{}));
   auto q = Graph<QIndices,QRNodes>{};
   auto r = Graph<RIndices,QRNodes>{};
-  Function< Graph<QR<QIndices,RIndices>,QRNodes> > f;
-  Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec3(7,8,9));
+
+  Function<
+    Graph<QR<QIndices,RIndices>,QRNodes>,
+    Graph<QR<DQIndices,DRIndices>,DQRNodes>
+  > f;
 
   f.set(a,a_val);
   f.evaluate();
   Mat33f q_val = f.get(q);
   Mat33f r_val = f.get(r);
-  auto expected_qr = qrDecompositionTest(a_val);
+  auto expected_qr = qrDecomposition(a_val);
   assert(q_val == expected_qr.q);
   assert(r_val == expected_qr.r);
-  f.setDeriv(q, dq);
-  f.setDeriv(r, dr);
+  f.set(dq, dq_val);
+  f.set(dr, dr_val);
   f.evaluateDerivs();
 
   Mat33f da = f.getDeriv(a);
+  float h = 4e-3;
 
   // Verify the derivatives.
   for (size_t i=0; i!=3; ++i) {
@@ -3309,11 +3211,11 @@ static void testQRDecompFunctionTest()
         for (size_t j2=0; j2!=3; ++j2) {
           auto q_a =
             [&,i2,j2]{
-              Mat33f q_val = qrDecompositionTest(a_val).q;
+              Mat33f q_val = qrDecomposition(a_val).q;
               return q_val.values[i2][j2];
             };
 
-          sum += finiteDeriv(q_a, a_val.values[i][j]) * dq.values[i2][j2];
+          sum += finiteDeriv(q_a, a_val.values[i][j], h) * dq_val.values[i2][j2];
         }
       }
 
@@ -3321,92 +3223,18 @@ static void testQRDecompFunctionTest()
         for (size_t j2=0; j2!=3; ++j2) {
           auto r_a =
             [&,i2,j2]{
-              Mat33f r_val = qrDecompositionTest(a_val).r;
+              Mat33f r_val = qrDecomposition(a_val).r;
               return r_val.values[i2][j2];
             };
 
-          sum += finiteDeriv(r_a, a_val.values[i][j]) * dr.values[i2][j2];
+          sum += finiteDeriv(r_a, a_val.values[i][j], h) * dr_val.values[i2][j2];
         }
       }
 
       // da.values[0][0] is 0 but sum is 1
-      assertNear(da.values[i][j],sum,3e-4);
+      assertNear(da.values[i][j],sum,5e-3);
     }
   }
-}
-#endif
-
-
-#if ADD_TEST
-static void testQRDecompFunction()
-{
-  std::mt19937 engine(/*seed*/1);
-  auto a = mat33Var<struct A>();
-  auto qr = qrDecomposition(a);
-  Mat33f dr = randomMat33(engine);
-  Mat33f dq = randomMat33(engine);
-
-  // qr is a QR<Q,R>, where Q and R are graphs with their own nodes.
-  // It needs to be that way so that the qrDecomposition() function is
-  // agnostic to the representation of the result.
-  using MergeResult = decltype(merge(nodesOf(qr.q),nodesOf(qr.r)));
-  using QRNodes = decltype(nodesOf(MergeResult{}));
-  using QIndices = decltype(outputOf(qr.q));
-  using RMap = decltype(mapBOf(MergeResult{}));
-  using RIndices = decltype(mappedIndices(outputOf(qr.r), RMap{}));
-  auto q = Graph<QIndices,QRNodes>{};
-  auto r = Graph<RIndices,QRNodes>{};
-  Function< Graph<QR<QIndices,RIndices>,QRNodes> > f;
-  Mat33f a_val = mat33(vec3(1,2,3),vec3(4,5,6),vec3(7,8,9));
-
-  f.set(a,a_val);
-  f.evaluate();
-  Mat33f q_val = f.get(q);
-  Mat33f r_val = f.get(r);
-  QR<Mat33f,Mat33f> expected_qr = qrDecomposition(a_val);
-  assert(q_val == expected_qr.q);
-  assert(r_val == expected_qr.r);
-  f.setDeriv(q, dq);
-  f.setDeriv(r, dr);
-  f.evaluateDerivs();
-  Mat33f da = f.getDeriv(a);
-
-  for (size_t i=0; i!=3; ++i) {
-    for (size_t j=0; j!=3; ++j) {
-      float sum = 0;
-
-      for (size_t i2=0; i2!=3; ++i2) {
-        for (size_t j2=0; j2!=3; ++j2) {
-          auto q_a =
-            [&,i2,j2]{ return qrDecomposition(a_val).q.values[i2][j2]; };
-
-          sum += finiteDeriv(q_a, a_val.values[i][j]) * dq.values[i2][j2];
-        }
-      }
-
-      for (size_t i2=0; i2!=3; ++i2) {
-        for (size_t j2=0; j2!=3; ++j2) {
-          auto r_a =
-            [&,i2,j2]{ return qrDecomposition(a_val).r.values[i2][j2]; };
-
-          sum += finiteDeriv(r_a, a_val.values[i][j]) * dr.values[i2][j2];
-        }
-      }
-
-      cerr << "da[" << i << "][" << j << "] = " << da.values[i][j] << ", "
-        "fda=" << sum << "\n";
-      assertNear(da.values[i][j],sum,0);
-    }
-  }
-
-  // Verify that the derivatives are correct.
-  assert(false);
-
-  // da is d(error)/d(a) given d(error)/d(qr)
-  // How do we verify this?
-  // fda[i][j] =
-  //   sum{i2,j2}(d(q[i2][j2])/d(a[i][j])*dq[i2][j2]) +
-  //   sum{i2,j2}(d(r[i2][j2])/d(a[i][j])*dr[i2][j2]) +
 }
 #endif
 
@@ -3516,18 +3344,12 @@ int main()
   testAdjointNodes();
   testDotAdjointNodes();
   testMulFunction();
-  testMulFunction2();
   testDotFunction();
   testDivFunction();
   testSqrtFunction();
   testMagFunction();
-#if ADD_TEST3
   test3();
-#endif
-#if ADD_TEST2
-  testQRDecompFunctionTest();
-#endif
-#if ADD_TEST
+#if ADD_QR_DECOMP
   testQRDecompFunction();
 #endif
 }
