@@ -147,3 +147,45 @@ a map from node indices to values.
 
 This is still awkward, since we can't do things like fold the same constant
 values into a single node.
+---
+We have an issue if one of our outputs is the same as one of our inputs.
+We specify the derivatives of the error wrt the outputs, and we expect
+to get the derivatives of the error wrt the inputs, but just because
+an output is equal to an input doesn't mean the derivative of the error
+wrt the output is the same as the derivative of the error wrt the input.
+We don't have a good way to tell the difference between these.
+We create nodes that represent the derivatives of the outputs, and we
+need those nodes to be used when we call f.setDeriv().
+It isn't clear how we do that though.
+We could pass variables that represent the derivatives of certain nodes.
+
+One thing to think about:  What if we ultimately used the same node more
+than once?
+
+It seems like we might want this situation:
+
+f.addDeriv(x,2);
+f.addDeriv(y,3);
+
+And if x and y were the same node, we'd want the total effect to be 5.
+
+So one approach would be to have nodes which represent "add to" operations.
+Then, we wouldn't end up overwriting the values, we'd add to them, which
+should give us the right answer.
+* Seems like this works, but it has a downside that we have to have
+  special nodes that change over time, which makes our graph no longer
+  be a regular function -- i.e.  we wouldn't be able to differentiate it.
+
+Another approach is to specify the derivative variables explicitly.  This way,
+if we use the same node twice, it isn't a problem, since we'll have two
+variables which contribute to the result.
+* This seems to work well, but it makes the function template parameters be
+  more complicated.
+
+A third approach is to return a separate list of the nodes that are the
+adjoints of our outputs.
+* It's not clear that this works reliably.  For example, we may have two
+  outputs which are the same two input nodes.  How do we map to them when
+  we set the derivatives?
+  f.setDeriv(x,2)
+  f.setDeriv(y,3) // what if x==y?

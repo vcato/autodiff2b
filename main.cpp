@@ -8,6 +8,7 @@
 #define ADD_QR_DECOMP 0
 #define ADD_TEST 0
 #define ADD_TEST2 0
+#define ADD_TEST3 0
 
 
 using std::cerr;
@@ -831,6 +832,15 @@ struct Vec3Indices {};
 }
 
 
+namespace {
+template <size_t x,size_t y,size_t z>
+static auto indicesOf(Vec3Indices<x,y,z>)
+{
+  return Indices<x,y,z>{};
+}
+}
+
+
 template <size_t x,size_t y,size_t z,typename Nodes>
 static auto xValue(Graph<Vec3Indices<x,y,z>,Nodes>)
 {
@@ -915,6 +925,33 @@ static auto adjointIndices(Vec3Indices<x,y,z>,Map)
 namespace {
 template <typename Row0,typename Row1,typename Row2>
 struct Mat33Indices;
+}
+
+
+namespace {
+template <size_t... args1,size_t... args2>
+static auto merge(Indices<args1...>,Indices<args2...>)
+{
+  return Indices<args1...,args2...>{};
+}
+}
+
+
+namespace {
+template <size_t... args1,size_t... args2,size_t... args3>
+static auto merge(Indices<args1...>,Indices<args2...>,Indices<args3...>)
+{
+  return Indices<args1...,args2...,args3...>{};
+}
+}
+
+
+namespace {
+template <typename Row0,typename Row1,typename Row2>
+static auto indicesOf(Mat33Indices<Row0,Row1,Row2>)
+{
+  return merge(indicesOf(Row0{}),indicesOf(Row1{}),indicesOf(Row2{}));
+}
 }
 
 
@@ -1699,6 +1736,15 @@ static auto qrDecompositionTest(const A &a)
 #endif
   auto r = mat33(row0,row1,row2);
   auto q = columns(q1,q2,q3);
+  return qr(q,r);
+}
+
+
+template <typename A>
+static auto test3Func(const A &a)
+{
+  auto r = a;
+  auto q = a*a;
   return qr(q,r);
 }
 
@@ -2878,32 +2924,6 @@ static void testMagFunction()
 }
 
 
-template <size_t x,size_t y,size_t z>
-static auto indicesOf(Vec3Indices<x,y,z>)
-{
-  return Indices<x,y,z>{};
-}
-
-
-template <size_t... args1,size_t... args2>
-static auto merge(Indices<args1...>,Indices<args2...>)
-{
-  return Indices<args1...,args2...>{};
-}
-
-template <size_t... args1,size_t... args2,size_t... args3>
-static auto merge(Indices<args1...>,Indices<args2...>,Indices<args3...>)
-{
-  return Indices<args1...,args2...,args3...>{};
-}
-
-template <typename Row0,typename Row1,typename Row2>
-static auto indicesOf(Mat33Indices<Row0,Row1,Row2>)
-{
-  return merge(indicesOf(Row0{}),indicesOf(Row1{}),indicesOf(Row2{}));
-}
-
-
 template <typename Q,typename R>
 static auto indicesOf(QR<Q,R>)
 {
@@ -2918,6 +2938,105 @@ static auto getValue3(QR<Q,R>,const Values &values)
   auto r = getValue3(R{},values);
   return qr(q,r);
 }
+
+
+#if ADD_TEST3
+static void test3()
+{
+  auto a = var<struct A>();
+  auto qr = test3Func(a);
+  float dr = 1;
+  float dq = 0;
+
+  // qr is a QR<Q,R>, where Q and R are graphs with their own nodes.
+  // It needs to be that way so that the qrDecomposition() function is
+  // agnostic to the representation of the result.
+  using MergeResult = decltype(merge(nodesOf(qr.q),nodesOf(qr.r)));
+  using QRNodes = decltype(nodesOf(MergeResult{}));
+  using QIndices = decltype(outputOf(qr.q));
+  using RMap = decltype(mapBOf(MergeResult{}));
+  using RIndices = decltype(mappedIndices(outputOf(qr.r), RMap{}));
+  auto q = Graph<QIndices,QRNodes>{};
+  auto r = Graph<RIndices,QRNodes>{};
+  // decltype(r) =
+  //   Graph<
+  //     ScalarIndices<0>,
+  //     List<
+  //       Node<0, Var<test3()::A> >,
+  //       Node<1, Mul<0, 0> >
+  //     >
+  //   >
+  // decltype(q) =
+  //   Graph<
+  //     ScalarIndices<1>,
+  //     List<
+  //       Node<0, Var<test3()::A> >,
+  //       Node<1, Mul<0, 0> >
+  //     >
+  //   >
+  Function< Graph<QR<QIndices,RIndices>,QRNodes> > f;
+  // q = a*a
+  // r = a
+  // da += dr
+  // da += a*dq
+  // da += a*dq
+  // decltype(f)::AdjointNodes =
+  //   List<
+  //     Node<0, Var<test3()::A> >,   0: a
+  //     Node<1, Mul<0, 0> >,         1: a*a
+  //     Node<2, Const<Zero> >,       2: 0
+  //     Node<3, External>,           3: d(a*a) = dq
+  //     Node<4, External>,           4: d(a)   = dr
+  //     Node<5, Mul<3, 0> >,         5: dq*a
+  //     Node<6, Add<4, 5> >,         6: dr + dq*a
+  //     Node<7, Add<6, 5> >          7: dr + dq*a + dq*a
+  //   >
+  //  decltype(f)::Adjoints =
+  //    MapList<
+  //    MapList<
+  //    MapList<
+  //    MapList<
+  //    MapList<
+  //    MapList<Empty,
+  //    MapEntry<0, 2> >,
+  //    MapEntry<1, 2> >,
+  //    MapEntry<1, 3> >,
+  //    MapEntry<0, 4> >,
+  //    MapEntry<0, 6> >,
+  //    MapEntry<0, 7> >
+  float a_val = 4;
+
+  f.set(a,a_val);
+  f.evaluate();
+  float q_val = f.get(q);
+  float r_val = f.get(r);
+  auto expected_qr = test3Func(a_val);
+  assertNear(q_val, expected_qr.q, 0);
+  assert(r_val == expected_qr.r);
+  debug = true;
+  f.setDeriv(q, dq); // dq = node 3
+  f.setDeriv(r, dr); // dr = node 7?
+  assert(false);
+  f.evaluateDerivs();
+
+  float da = f.getDeriv(a);
+
+  // Verify the derivatives.
+  float sum = 0;
+
+  {
+    auto q_a = [&]{ return test3Func(a_val).q; };
+    sum += finiteDeriv(q_a, a_val) * dq;
+  }
+
+  {
+    auto r_a = [&]{ return test3Func(a_val).r; };
+    sum += finiteDeriv(r_a, a_val) * dr;
+  }
+
+  assertNear(da,sum,3e-4);
+}
+#endif
 
 
 #if ADD_TEST2
@@ -3181,6 +3300,9 @@ int main()
   testDivFunction();
   testSqrtFunction();
   testMagFunction();
+#if ADD_TEST3
+  test3();
+#endif
 #if ADD_TEST2
   testQRDecompFunctionTest();
 #endif
