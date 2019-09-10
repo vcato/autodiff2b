@@ -24,7 +24,6 @@ namespace {
 
 template <typename Tag> struct Var { };
 template <typename ValueType> struct Const { };
-struct External {};
 template <typename Tag> struct Tagged {};
 
 }
@@ -2111,60 +2110,6 @@ static auto
 }
 
 
-template <typename Adjoints,typename Nodes,size_t result_index>
-static auto
-  addAdjoint(AdjointGraph<Adjoints,Nodes>,Indexed<result_index>)
-{
-  // Add a node that we'll use to represent the derivative of the result.
-  // This will be an input in the adjoint graph.
-  constexpr size_t new_dresult_index = listSize<Nodes>;
-  using NewNodes = decltype(addNode(Nodes{},External{}));
-
-  // Set the adjoint of our result node
-  using NewAdjoints =
-    decltype(
-      setAdjoint(
-        Adjoints{},
-        /*adjoint_node*/Indexed<result_index>{},
-        /*value*/Indexed<new_dresult_index>{}
-      )
-    );
-
-  return AdjointGraph<NewAdjoints,NewNodes>{};
-}
-
-
-template <typename Adjoints,typename Nodes>
-static auto addAdjoints(AdjointGraph<Adjoints,Nodes>,Indices<>)
-{
-  return AdjointGraph<Adjoints,Nodes>{};
-}
-
-
-template <
-  typename Adjoints,
-  typename Nodes,
-  size_t first_result_index,
-  size_t... rest_result_indices
->
-static auto
-  addAdjoints(
-    AdjointGraph<Adjoints,Nodes>,
-    Indices<first_result_index,rest_result_indices...>
-  )
-{
-  using AdjointGraph2 =
-    decltype(
-      addAdjoint(
-        AdjointGraph<Adjoints,Nodes>{},
-        Indexed<first_result_index>{}
-      )
-    );
-
-  return addAdjoints(AdjointGraph2{},Indices<rest_result_indices...>{});
-}
-
-
 // Create the nodes that contain the adjoints by going through a forward
 // and reverse pass.  In the forward pass, we introduce an adjoint node
 // for each node.  In the reverse pass, we update the adjoint nodes.
@@ -2498,12 +2443,6 @@ template <size_t n,size_t index,typename A>
 void setValue(float (&values)[n],Node<index,Const<A>>)
 {
   values[index] = A::value();
-}
-
-
-template <size_t n,size_t index>
-void setValue(float (&)[n],Node<index,External>)
-{
 }
 
 
