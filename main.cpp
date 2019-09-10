@@ -723,15 +723,6 @@ auto let(Graph<ScalarIndices<0>,List<Node<0,Var<Tag>>>>,const T& value)
 
 
 namespace {
-template <typename Tag,typename T>
-auto dual(Graph<ScalarIndices<0>,List<Node<0,Var<Tag>>>>,T& value)
-{
-  return Dual<Tag,T>{value};
-}
-}
-
-
-namespace {
 template <size_t index,typename First,typename T>
 auto valueList(const First &first,T value)
 {
@@ -2019,18 +2010,6 @@ static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Div<i,j>>)
 }
 
 
-template <typename Adjoints,typename Nodes,size_t k,size_t i>
-static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,XValue<i>>)
-{
-  constexpr size_t adjoint_k = find_adjoint<Adjoints,k>;
-
-  // adjoints[i].x += adjoints[k]
-
-  return
-    addTo(AdjointGraph<Adjoints,Nodes>{},Indexed<i>{},Indexed<adjoint_k>{});
-}
-
-
 template <typename Adjoints,typename NewNodes>
 static auto revNodes(AdjointGraph<Adjoints,NewNodes>,List<>)
 {
@@ -2060,27 +2039,9 @@ static auto
 }
 
 
-template <size_t zero_node>
-static auto makeZeroAdjoints(Indexed<0>,Indexed<zero_node>)
-{
-  return Empty{};
-}
-
-
-template <size_t node_count,size_t zero_node>
-static auto
-  makeZeroAdjoints(Indexed<node_count>,Indexed<zero_node>)
-{
-  using First =
-    decltype(makeZeroAdjoints(Indexed<node_count-1>{},Indexed<zero_node>{}));
-
-  return MapList<First,MapEntry<node_count-1,zero_node>>{};
-}
-
-
 template <size_t zero_node,typename ResultAdjointMap>
 static auto
-  makeZeroAdjoints2(
+  makeAdjoints(
     Indexed</*node_count*/0>,
     Indexed<zero_node>,
     ResultAdjointMap
@@ -2092,11 +2053,11 @@ static auto
 
 template <size_t node_count,size_t zero_node,typename ResultAdjointMap>
 static auto
-  makeZeroAdjoints2(Indexed<node_count>,Indexed<zero_node>,ResultAdjointMap)
+  makeAdjoints(Indexed<node_count>,Indexed<zero_node>,ResultAdjointMap)
 {
   using First =
     decltype(
-      makeZeroAdjoints2(
+      makeAdjoints(
         Indexed<node_count-1>{},
         Indexed<zero_node>{},
         ResultAdjointMap{}
@@ -2123,19 +2084,17 @@ static auto adjointNodes(ResultIndices,ResultAdjointMap,List<Nodes...>)
   // Add a zero node to the nodes if we don't have one, since we'll need
   // to initialize all the adjoints to this.
   using InsertResult = decltype(insertNode(List<Nodes...>{},Const<Zero>{}));
-  using NodesWithZero = decltype(newNodesOf(InsertResult{}));
+  using NodesWithDResult = decltype(newNodesOf(InsertResult{}));
   constexpr size_t zero_index = newIndexOf(InsertResult{});
 
   using Adjoints2 =
     decltype(
-      makeZeroAdjoints2(
+      makeAdjoints(
         Indexed<sizeof...(Nodes)>{},
         Indexed<zero_index>{},
         MapWithDefault<ResultAdjointMap,zero_index>{}
       )
     );
-
-  using NodesWithDResult = NodesWithZero;
 
   // Process the nodes in reverse, adding new nodes and updating the adjoints.
   // If we encounter a node which has adjoint values, then those need to
@@ -2151,18 +2110,6 @@ static auto adjointNodes(ResultIndices,ResultAdjointMap,List<Nodes...>)
   using NewNodes = decltype(nodesOf(RevResult{}));
   using NewAdjoints = decltype(adjointsOf(RevResult{}));
   return AdjointGraph<NewAdjoints,NewNodes>{};
-}
-
-
-template <
-  typename... Nodes1,
-  size_t result_index
-    // I think this needs to be generalized to take a list of result
-    // indices.
->
-static auto adjointNodes(Indexed<result_index>,List<Nodes1...>)
-{
-  return adjointNodes(Indices<result_index>{},List<Nodes1...>{});
 }
 
 
@@ -2195,31 +2142,6 @@ static void testFindAdjoint()
     decltype(findAdjoint(Adjoints{},Indexed<0>{}))::value;
 
   static_assert(result == 12);
-}
-
-
-static void testMakeZeroAdjoints()
-{
-  constexpr size_t zero_node = 1;
-  constexpr size_t node_count = 2;
-
-  using Result =
-    decltype(
-      makeZeroAdjoints(
-        Indexed<node_count>{},
-        Indexed<zero_node>{}
-      )
-    );
-
-  using Expected =
-    MapList<
-      MapList<
-        Empty, MapEntry<0, zero_node>
-      >,
-      MapEntry<1, zero_node>
-    >;
-
-  static_assert(is_same_v<Result,Expected>);
 }
 
 
@@ -2288,51 +2210,6 @@ static void testAddDeriv()
 
   using Expected = AdjointGraph<ExpectedAdjoints,ExpectedNodes>;
   static_assert(is_same_v<Result,Expected>);
-}
-
-
-template <size_t index,typename... Nodes>
-static auto nodesOf(Graph<ScalarIndices<index>,List<Nodes...>>)
-{
-  return List<Nodes...>{};
-}
-
-
-// This needs to get the variable tag and look that up in the adjoint
-// grpah.
-template <typename AdjointGraph,typename Tag>
-static auto
-  varAdjoint(
-    Graph<
-      ScalarIndices<0>,
-      List<
-        Node<0,Var<Tag>>
-      >
-    >,
-    AdjointGraph
-  )
-{
-  using NodeIndex =
-    decltype(findNodeIndex(Var<Tag>{},nodesOf(AdjointGraph{})));
-
-  return findAdjoint(adjointsOf(AdjointGraph{}),NodeIndex{});
-}
-
-
-template <typename Variable,typename Values,typename AdjointGraph>
-static auto adjointValue(Variable,const Values &values,AdjointGraph)
-{
-  using Index = decltype(varAdjoint(Variable{},AdjointGraph{}));
-  return getValue(Index{},values);
-}
-
-
-template <typename Variable,size_t n_values,typename AdjointGraph>
-static auto adjointValue(Variable,const float (&values)[n_values],AdjointGraph)
-{
-  using Index = decltype(varAdjoint(Variable{},AdjointGraph{}));
-  assert(Index::value < n_values);
-  return values[Index::value];
 }
 
 
@@ -3123,7 +3000,6 @@ int main()
   }
 #endif
   testFindAdjoint();
-  testMakeZeroAdjoints();
   testAddDeriv();
   testMulFunction();
   testDotFunction();
