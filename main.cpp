@@ -2170,57 +2170,10 @@ static auto
 // for each node.  In the reverse pass, we update the adjoint nodes.
 template <
   typename... Nodes,
-  typename ResultIndices
->
-static auto adjointNodes(ResultIndices,List<Nodes...>)
-{
-  // Add a zero node to the nodes if we don't have one, since we'll need
-  // to initialize all the adjoints to this.
-  using InsertResult = decltype(insertNode(List<Nodes...>{},Const<Zero>{}));
-  using NodesWithZero = decltype(newNodesOf(InsertResult{}));
-  constexpr size_t zero_index = newIndexOf(InsertResult{});
-
-  // Build the initial set of adjoints where all nodes are zero.
-  using Adjoints =
-    decltype(
-      makeZeroAdjoints(Indexed<sizeof...(Nodes)>{},Indexed<zero_index>{})
-    );
-
-  using AdjointGraph2 =
-    decltype(
-      addAdjoints(
-        AdjointGraph<Adjoints,NodesWithZero>{},
-        ResultIndices{}
-      )
-    );
-
-  using Adjoints2 = decltype(adjointsOf(AdjointGraph2{}));
-  using NodesWithDResult = decltype(nodesOf(AdjointGraph2{}));
-
-  // Process the nodes in reverse, adding new nodes and updating the adjoints.
-  using RevResult =
-    decltype(
-      revNodes(
-        AdjointGraph<Adjoints2,NodesWithDResult>{},
-        List<Nodes...>{}
-      )
-    );
-
-  using NewNodes = decltype(nodesOf(RevResult{}));
-  using NewAdjoints = decltype(adjointsOf(RevResult{}));
-  return AdjointGraph<NewAdjoints,NewNodes>{};
-}
-
-
-// Create the nodes that contain the adjoints by going through a forward
-// and reverse pass.  In the forward pass, we introduce an adjoint node
-// for each node.  In the reverse pass, we update the adjoint nodes.
-template <
-  typename... Nodes,
   typename ResultIndices,
   typename ResultAdjointMap
 >
-static auto adjointNodes2(ResultIndices,ResultAdjointMap,List<Nodes...>)
+static auto adjointNodes(ResultIndices,ResultAdjointMap,List<Nodes...>)
 {
   // Add a zero node to the nodes if we don't have one, since we'll need
   // to initialize all the adjoints to this.
@@ -2530,114 +2483,6 @@ auto
 
 
 
-static void testAdjointNodes()
-{
-  // Define our graph
-  auto a = var<struct A>();
-  auto b = var<struct B>();
-  auto c = var<struct C>();
-  auto graph = a*b*c;
-  using AdjointGraph = decltype(adjointNodes(indexOf(graph),nodesOf(graph)));
-  using Adjoints = decltype(adjointsOf(AdjointGraph{}));
-
-  float a_val = 5;
-  float b_val = 6;
-  float c_val = 7;
-  float dgraph_val = 1;
-  using NewNodes = decltype(nodesOf(AdjointGraph{}));
-  using Adjoints = decltype(adjointsOf(AdjointGraph{}));
-  static constexpr size_t graph_index = decltype(indexOf(graph))::value;
-
-  constexpr size_t dgraph_index =
-    decltype(findAdjoint(Adjoints{},Indexed<graph_index>{}))::value;
-
-  static constexpr size_t n_values = sizeOf(NewNodes{});
-  float values[n_values];
-
-  // Set the inputs
-  setValue2(a,a_val,values,NewNodes{});
-  setValue2(b,b_val,values,NewNodes{});
-  setValue2(c,c_val,values,NewNodes{});
-
-  // Evaluate the normal part of the graph
-  evaluate<0,dgraph_index>(NewNodes{},values);
-
-  // Verify the output
-  assert(values[graph_index] == a_val*b_val*c_val);
-
-  // Set the derivative of the output
-  values[dgraph_index] = dgraph_val;
-
-  // Evaluate the rest of the graph
-  evaluate<dgraph_index+1,n_values>(NewNodes{},values);
-
-  // Extract the derivatives
-  float da_val = adjointValue(a,values,AdjointGraph{});
-  float db_val = adjointValue(b,values,AdjointGraph{});
-  float dc_val = adjointValue(c,values,AdjointGraph{});
-
-  // Verify
-  assert(da_val == b_val*c_val);
-  assert(db_val == a_val*c_val);
-  assert(dc_val == a_val*b_val);
-}
-
-
-static void testDotAdjointNodes()
-{
-  // Define our graph
-  auto ax = var<struct AX>();
-  auto ay = var<struct AY>();
-  auto az = var<struct AZ>();
-  auto bx = var<struct BX>();
-  auto by = var<struct BY>();
-  auto bz = var<struct BZ>();
-  auto a = vec3(ax,ay,az);
-  auto b = vec3(bx,by,bz);
-  auto graph = dot(a,b);
-  constexpr size_t graph_index = decltype(indexOf(graph))::value;
-
-  using AdjointGraph =
-    decltype(adjointNodes(Indexed<graph_index>{},nodesOf(graph)));
-
-  // Evaluate the adjoint graph
-  auto a_val = vec3(1,2,3);
-  auto b_val = vec3(4,5,6);
-  float dgraph_val = 1;
-  using NewNodes = decltype(nodesOf(AdjointGraph{}));
-  using Adjoints = decltype(adjointsOf(AdjointGraph{}));
-  static constexpr size_t n_values = sizeOf(NewNodes{});
-  float values[n_values];
-  setValue2(ax,a_val.x,values,NewNodes{});
-  setValue2(ay,a_val.y,values,NewNodes{});
-  setValue2(az,a_val.z,values,NewNodes{});
-  setValue2(bx,b_val.x,values,NewNodes{});
-  setValue2(by,b_val.y,values,NewNodes{});
-  setValue2(bz,b_val.z,values,NewNodes{});
-
-  constexpr size_t dgraph_index =
-    decltype(findAdjoint(Adjoints{},Indexed<graph_index>{}))::value;
-
-  evaluate<0,dgraph_index>(NewNodes{},values);
-  values[dgraph_index] = dgraph_val;
-  evaluate<dgraph_index+1,n_values>(NewNodes{},values);
-
-  // Extract the derivatives
-  float dax_val = adjointValue(ax,values,AdjointGraph{});
-  float day_val = adjointValue(ay,values,AdjointGraph{});
-  float daz_val = adjointValue(az,values,AdjointGraph{});
-  float dbx_val = adjointValue(bx,values,AdjointGraph{});
-  float dby_val = adjointValue(by,values,AdjointGraph{});
-  float dbz_val = adjointValue(bz,values,AdjointGraph{});
-  Vec3f da_val = vec3(dax_val,day_val,daz_val);
-  Vec3f db_val = vec3(dbx_val,dby_val,dbz_val);
-
-  // Verify
-  assert(da_val == vec3(4,5,6));
-  assert(db_val == vec3(1,2,3));
-}
-
-
 namespace {
 
 // Variable values are set externally, so there's nothing to do here.
@@ -2796,7 +2641,7 @@ struct
 
   using AdjointGraph =
     decltype(
-      adjointNodes2(
+      adjointNodes(
         indicesOf(Output{}),
         makeMap(
           indicesOf(Output{}),
@@ -3341,8 +3186,6 @@ int main()
   testFindAdjoint();
   testMakeZeroAdjoints();
   testAddDeriv();
-  testAdjointNodes();
-  testDotAdjointNodes();
   testMulFunction();
   testDotFunction();
   testDivFunction();
