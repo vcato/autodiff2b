@@ -409,7 +409,7 @@ auto mapExpr(Literal<chars...>,Map)
 
 
 namespace {
-template <template<size_t...> typename Op,size_t... indices,typename Map>
+template <template<size_t...> class Op,size_t... indices,typename Map>
 auto mapExpr(Op<indices...>, Map)
 {
   return Op<mapped_index<indices,Map>...>{};
@@ -663,7 +663,7 @@ auto mergedGraph(MergedNodes,NewExpr)
 
 namespace {
 template <
-  template <size_t,size_t> typename Op,
+  template <size_t,size_t> class Op,
   size_t index_a,typename NodesA,
   size_t index_b,typename NodesB
 >
@@ -891,9 +891,11 @@ struct Graph<Vec3Indices<x,y,z>,Nodes> {
 }
 
 
+namespace {
 static Vec3f vec3(float x,float y,float z)
 {
   return Vec3f{x,y,z};
+}
 }
 
 
@@ -1050,12 +1052,6 @@ struct Graph<Mat33Indices<Row0,Row1,Row2>,Nodes> {
 }
 
 
-static Vec3f vec3(const float (&v)[3])
-{
-  return Vec3f{v[0],v[1],v[2]};
-}
-
-
 static auto elem(const Vec3f &v,Indexed<0>) { return v.x; }
 static auto elem(const Vec3f &v,Indexed<1>) { return v.y; }
 static auto elem(const Vec3f &v,Indexed<2>) { return v.z; }
@@ -1173,6 +1169,14 @@ auto getValue3(Vec3Indices<xi,yi,zi>,const Values &values)
   float y = getValue3(ScalarIndices<yi>{},values);
   float z = getValue3(ScalarIndices<zi>{},values);
   return vec3(x,y,z);
+}
+}
+
+
+namespace {
+static inline Vec3f vec3(const float (&v)[3])
+{
+  return Vec3f{v[0],v[1],v[2]};
 }
 }
 
@@ -1354,7 +1358,7 @@ template <size_t i> auto evalOp(ZValue<i>,const Vec3f &v) { return zValue(v); }
 
 namespace {
 template <
-  template <size_t...> typename Op,
+  template <size_t...> class Op,
   size_t... indices,
   typename Values,
   typename Lets
@@ -1395,7 +1399,14 @@ namespace {
 template <typename Nodes,typename... Lets>
 static auto buildValues(Nodes,Lets... lets)
 {
-  struct : Lets... {} let_list {lets...};
+  struct LetList : Lets... {
+    LetList(const Lets &...lets)
+    : Lets(lets)...
+    {
+    }
+  };
+
+  LetList let_list { lets...  };
 
   return evalNodes( /*values*/Empty{}, Nodes{}, let_list );
 }
