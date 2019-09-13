@@ -9,7 +9,13 @@
 
 
 using std::cerr;
-using std::is_same_v;
+//using std::is_same_v;
+
+
+namespace {
+template <typename T,typename U> constexpr bool is_same_v =
+  std::is_same<T,U>::value;
+}
 
 
 namespace {
@@ -1666,7 +1672,7 @@ static void testFindNodeIndex()
       )
     );
 
-  static_assert(MaybeMergedIndex::value == 1);
+  static_assert(MaybeMergedIndex::value == 1,"");
 }
 
 
@@ -2203,7 +2209,7 @@ static void testFindAdjoint()
   constexpr size_t result =
     decltype(findAdjoint(Adjoints{},Indexed<0>{}))::value;
 
-  static_assert(result == 12);
+  static_assert(result == 12,"");
 }
 
 
@@ -2271,7 +2277,7 @@ static void testAddDeriv()
     >;
 
   using Expected = AdjointGraph<ExpectedAdjoints,ExpectedNodes>;
-  static_assert(is_same_v<Result,Expected>);
+  static_assert(is_same_v<Result,Expected>,"");
 }
 
 
@@ -2353,7 +2359,7 @@ auto
     float (&values)[n_values]
   ) -> std::enable_if_t<(begin < end)>
 {
-  static_assert(begin < n_values);
+  static_assert(begin < n_values,"");
   setValue(values,Node<begin,Expr>{});
 
   if (debug) {
