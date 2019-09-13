@@ -349,6 +349,25 @@ static float
 }
 
 
+namespace {
+template <char...> struct Literal { };
+}
+
+
+template <char... chars>
+static float
+  floatValue(
+    Graph<ScalarIndices<0>,
+      List<
+        Node<0,Literal<chars...>>
+      >
+    >
+  )
+{
+  return valueOf(Literal<chars...>{});
+}
+
+
 template <size_t index,typename Nodes>
 Graph<ScalarIndices<index>,Nodes>::operator float() const
 {
@@ -370,6 +389,15 @@ template <typename A,typename Map>
 auto mapExpr(Const<A>,Map)
 {
   return Const<A>{};
+}
+}
+
+
+namespace {
+template <char...chars,typename Map>
+auto mapExpr(Literal<chars...>,Map)
+{
+  return Literal<chars...>{};
 }
 }
 
@@ -1282,6 +1310,24 @@ auto evalExpr(Const<A>, const Values &,const Lets &)
 
 
 namespace {
+template <char c>
+float valueOf(Literal<c>)
+{
+  return c-'0';
+}
+}
+
+
+namespace {
+template <char... chars,typename Values,typename Lets>
+auto evalExpr(Literal<chars...>, const Values &,const Lets &)
+{
+  return valueOf(Literal<chars...>{});
+}
+}
+
+
+namespace {
 template <typename Op,typename... Args>
 auto evalOp(Op,Args... args)
 {
@@ -1706,6 +1752,15 @@ static auto test3Func(const A &a)
 }
 
 
+namespace {
+template <char... chars>
+static auto operator""_t()
+{
+  return Graph<ScalarIndices<0>,List<Node<0,Literal<chars...>>>>{};
+}
+}
+
+
 #if ADD_QR_DECOMP
 template <typename A>
 static auto qrDecomposition(const A &a)
@@ -1725,10 +1780,9 @@ static auto qrDecomposition(const A &a)
   auto u3 = a3 - q1*r13 - q2*r23;
   auto r33 = mag(u3);
   auto q3 = u3/r33;
-  auto zero = constant<Zero>();
-  auto row0 = vec3( r11, r12,r13);
-  auto row1 = vec3(zero, r22,r23);
-  auto row2 = vec3(zero,zero,r33);
+  auto row0 = vec3(r11,r12,r13);
+  auto row1 = vec3(0_t,r22,r23);
+  auto row2 = vec3(0_t,0_t,r33);
   auto r = mat33(row0,row1,row2);
   auto q = columns(q1,q2,q3);
   return qr(q,r);
@@ -2003,10 +2057,18 @@ static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Div<i,j>>)
   using IDIVJ2 = decltype(insertNode(Nodes2{},Div<i,j2>{}));
   constexpr size_t i_div_j2 = newIndexOf(IDIVJ2{});
   using Nodes3 = decltype(newNodesOf(IDIVJ2{}));
+
   return
     subExpr(
       AdjointGraph<Adjoints2,Nodes3>{},Indexed<j>{},Mul<adjoint_k,i_div_j2>{}
     );
+}
+
+
+template <char... chars,typename Adjoints,typename Nodes,size_t k>
+static auto addDeriv(AdjointGraph<Adjoints,Nodes>,Node<k,Literal<chars...>>)
+{
+  return AdjointGraph<Adjoints,Nodes>{};
 }
 
 
@@ -2355,6 +2417,12 @@ template <size_t n,size_t index,size_t a>
 void setValue(float (&values)[n],Node<index,Sqrt<a>>)
 {
   values[index] = sqrt(values[a]);
+}
+
+template <size_t n,size_t index,char... chars>
+void setValue(float (&values)[n],Node<index,Literal<chars...>>)
+{
+  values[index] = valueOf(Literal<chars...>{});
 }
 
 }
@@ -2907,6 +2975,12 @@ int main()
     auto a = var<struct A>();
     auto b = a+a;
     assert(eval(b,let(a,3)) == 6);
+  }
+  {
+    auto a = 1_t;
+    auto b = 2_t;
+    auto c = a+b;
+    assert(eval(c) == 3);
   }
   {
     auto a = var<struct A>();
